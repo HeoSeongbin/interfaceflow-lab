@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: interfaceflow
+      POSTGRES_USER: interfaceflow
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interfaceflow -d interfaceflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  target:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args: { MODULE: target-simulator }
+    environment: &db-env
+      DB_URL: jdbc:postgresql://db:5432/interfaceflow
+      DB_USER: interfaceflow
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports: ["127.0.0.1:8081:8081"]
+    depends_on:
+      db: { condition: service_healthy }
+  integration:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args: { MODULE: integration-server }
+    environment:
+      <<: *db-env
+      TARGET_URL: http://target:8081
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      db: { condition: service_healthy }
+      target: { condition: service_started }
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports: ["127.0.0.1:5173:80"]
+    depends_on: [integration]
+volumes:
+  pgdata:
