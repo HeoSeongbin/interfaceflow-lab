@@ -3,6 +3,9 @@ server:
 spring:
   application:
     name: integration-server
+  jackson:
+    deserialization:
+      use-big-decimal-for-floats: true
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/interfaceflow}
     username: ${DB_USER:interfaceflow}

@@ -28,6 +28,11 @@ public class ApiErrors extends ResponseEntityExceptionHandler {
         return ResponseEntity.badRequest().body(error("VALIDATION_ERROR"));
     }
 
+    @ExceptionHandler(ApiProblem.class)
+    public ResponseEntity<Object> problem(ApiProblem problem) {
+        return ResponseEntity.status(problem.status()).body(Map.of("code",problem.code(),"traceId",String.valueOf(MDC.get("traceId")),"message",problem.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> unexpected(Exception exception) {
         return ResponseEntity.internalServerError().body(error("INTERNAL_ERROR"));

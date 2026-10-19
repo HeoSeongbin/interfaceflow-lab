@@ -23,6 +23,14 @@
 - 캡처 이미지는 `frontend/test-results`, 실패 trace와 HTML 보고서는 `frontend/playwright-report`에 저장한다. 선택한 검증 화면은 `docs/screenshots`에 보존한다.
 - `compose-e2e` CI는 Compose 스택과 별도 Chromium/DB 검증을 실행하도록 구성했다. 구성 자체와 실제 원격 실행 성공을 구분한다.
 
-## Phase 2 이후
+## Phase 2 검증 (실행 완료)
+
+- PayloadEngineTest: 입력 불변·결정성, 중첩 매핑/기본값/필드 제거, 스칼라 변환, 누락/타입/날짜/Null, Source/Target 단계, 문자열/숫자/Enum/pattern, 잘못된 경로/충돌/미지원 RE2, 마스킹과 이름 변경, 직렬화된 Null, 출력 크기.
+- 실제 PostgreSQL: V2 업그레이드, 미리보기 부작용 없음, 매핑된 HTTP 본문, 단계별 실패 저장/미전송, 불변 버전/stale 충돌/동시 변경, HTTP 대기 중 설정 업데이트, 삭제 정책, SOURCE 등록/TARGET 제한, 전문 마스킹, 논리 ID 반복의 별도 기록/페이지, 정밀 소수 범위.
+- E2E: 기존 6개 + 미리보기/Source 실패/인터페이스 관리 전체 흐름의 3개 = 9개 시나리오 × 2개 viewport, 총 18건.
+- 인터페이스 관리 흐름은 실제 UI로 등록 → v2 수정 → 해당 정의 선택 → 매핑 전송 → 이력 상세 → 삭제 대신 비활성화를 수행한다.
+- Maven 51, Vitest 5, Playwright 18 통과. Docker/원격 CI는 별도 미검증 상태다.
+
+## Phase 3 이후
 
 PROJECT.md 18절의 12개 시나리오를 순서대로 자동화한다. 특히 timeout 후 target 처리 성공, 동일 키/다른 본문 충돌, 동시 중복 요청, 재시도 3번째 성공(Trace 동일/Attempt 상이), 처리 중 서버 종료 복구는 실제 DB/HTTP 기반으로 검증한다. 장애 API와 재시도는 현재 미구현이다.

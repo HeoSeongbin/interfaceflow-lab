@@ -1,14 +1,23 @@
 package lab.interfaceflow.integration;
+
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import lab.interfaceflow.common.Contracts.*;
 import org.springframework.web.bind.annotation.*;
 import org.slf4j.MDC;
+
 @RestController
 public class ApiController {
     private final TransmissionService service;
-    public ApiController(TransmissionService service){this.service=service;}
+    private final RequestLifecycle lifecycle;
+    public ApiController(TransmissionService service,RequestLifecycle lifecycle){this.service=service;this.lifecycle=lifecycle;}
     @PostMapping("/api/requests")
     public SendResult send(@Valid @RequestBody SendRequest request){return service.send(request,MDC.get("traceId"));}
-    @GetMapping("/api/interfaces")
-    public Object interfaces(){return java.util.List.of(java.util.Map.of("interfaceId","IF-USER-001","interfaceName","사용자 정보 연동 · Phase 1", "enabled",true));}
+    public record PreviewInput(JsonNode payload) {}
+    @PostMapping("/api/interfaces/{id}/preview")
+    public TransmissionService.Preview preview(@PathVariable String id,@RequestBody PreviewInput request){return service.preview(id,request.payload());}
+    @GetMapping("/api/requests")
+    public RequestLifecycle.HistoryPage history(@RequestParam(defaultValue="") String query,@RequestParam(defaultValue="") String status,
+            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){return lifecycle.history(query,status,page,size);}
+    @GetMapping("/api/requests/{id}") public JsonNode detail(@PathVariable String id){return lifecycle.detail(id);}
 }

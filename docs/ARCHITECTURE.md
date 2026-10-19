@@ -1,5 +1,7 @@
 # 아키텍처와 데이터 설계
 
+현재 구현은 Phase 2이다. 아래 Phase 1 설명은 초기 baseline이며, Phase 2 변경 사항과 현재 API는 문서 후반 및 API.md를 따른다.
+
 ```mermaid
 flowchart LR
   A[React Console :5173] -->|same-origin /api| B[Integration Server :8080]
@@ -39,3 +41,52 @@ Phase 1: SENDING → SUCCESS / FAILED / UNKNOWN. HTTP 4xx는 FAILED, I/O·5xx·�
 MyBatis 단일 statement를 짧게 커밋하며 외부 HTTP 동안 트랜잭션을 유지하지 않는다. 결과 저장 실패 시 성공으로 응답하지 않는다. Phase 1에서 영속화한 요청·수신 기록으로 trace_id를 SQL 조회할 수 있고 통합 Trace Explorer는 Phase 3에서 구현한다.
 
 로컬 Compose 포트는 loopback에만 바인딩한다. 인증은 미구현이므로 공개 서비스 배포 대상이 아니다. Nginx 전문 제한 64KB, 서버 입력 제한, SQL #{} 바인딩, 전문·비밀값 로그 제외, MDC finally 정리를 적용한다. 향후 민감 필드 재귀 마스킹 및 저장 보관기간 정책을 도입한다.
+
+## Phase 2 현재 구현
+
+- IF_SYSTEM: SOURCE/TARGET 등록 정보. API로 SOURCE만 등록하며 SYSTEM_B가 사전 정의된 대상이다. 실제 URL은 서버 환경 변수로만 설정한다.
+- IF_INTERFACE: 현재 메타데이터와 current_version. IF_INTERFACE_VERSION은 불변 snapshot JSONB와 생성 시각, 복합 PK(interface_id,version)를 가진다.
+- IF_FIELD_MAPPING / IF_VALIDATION_RULE: 버전 FK와 순번을 가진 규칙 JSONB. 전체 snapshot과 같은 트랜잭션으로 저장한다. 엔진은 전체 snapshot을 읽는다.
+- IF_REQUEST 확장: source_system, interface_version FK, original/mapped/response JSONB, validation_errors, processing_stage, duration_ms. Phase 1 행은 기존 값과 null snapshot을 유지한다.
+- 목록 인덱스: interface_id/created_at, status/created_at. 요청/응답 전문과 조회 결과는 마스킹된 snapshot이며 보호된 재처리 원본 저장소는 아직 없다.
+
+```mermaid
+sequenceDiagram
+    participant UI as Console
+    participant API as Integration
+    participant DB as PostgreSQL
+    participant B as Target
+    UI->>API: Interface ID + Request ID + Source JSON
+    API->>DB: short TX: shared definition lock + version + request registration
+    DB-->>API: commit, immutable definition snapshot
+    API->>API: Source validation / mapping / Target validation
+    API->>DB: READY or validation/mapping failure (short write)
+    opt validation succeeded
+      API->>DB: READY → SENDING + new Attempt ID
+      API->>B: actual HTTP with all three identifiers
+      B->>DB: target receipt
+      B-->>API: HTTP response
+      API->>DB: SUCCESS / FAILED / UNKNOWN + redacted response
+    end
+    API-->>UI: result, version, redacted JSON, field errors
+```
+
+현재 상태 전환은 VALIDATING → VALIDATION_FAILED / MAPPING_FAILED / READY → SENDING → SUCCESS / FAILED / UNKNOWN이다. 각 UPDATE는 기대 상태를 확인한다. 전체 상태 전환 이벤트와 별도 IF_REQUEST_ATTEMPT는 Phase 3~5에서 도입한다. 검증 실패에는 Attempt ID를 만들지 않는다. 설정 수정/삭제는 배타 잠금과 version 비교를 사용하며 접수와 경쟁하지 않는다. HTTP 대기 중에는 정의 잠금이 없다.
+
+요청 목록/상세는 RequestLifecycle이 관리하고 XML Mapper만으로 SQL을 실행한다. 목록/총 건수는 REPEATABLE_READ로 일관되게 읽고, 외부 HTTP는 이 트랜잭션에도 포함하지 않는다. 페이지 최대 100, 검색 최대 160자, 모든 SQL 값은 #{} 바인딩이다.
+
+미리보기는 DB 현재 설정 버전으로 엔진을 실행하지만 요청/HTTP/Attempt/이력은 만들지 않는다. Source/Target 검증 규칙은 각각 독립적이며 잘못된 출력이 Target으로 전달되지 않도록 한다.
+
+## 전문 보관 정책
+
+입력과 매핑 출력은 64KiB 이하이며 요청 전문을 로그에 출력하지 않는다. 표준 민감 키와 매핑된 민감 source의 target 경로를 재귀 마스킹한다. 저장된 진단 전문은 실제 HTTP 원문과 다를 수 있다. UI/조회/미리보기도 같은 마스킹을 적용한다. 원본 의미를 완전히 복구할 수 없으므로 이를 재처리 입력으로 사용하지 않는다.
+
+기본 운영 권장 보관 기간은 30일이다. 자동 삭제는 아직 없으며 필요 시 운영자가 보관 정책에 따라 다음 SQL을 별도 적용한다. 진행 중인 요청은 삭제하지 않는다. 설정 버전은 전송 이력 해석을 위해 유지한다.
+
+```sql
+DELETE FROM integration.if_request
+WHERE created_at < now() - interval '30 days'
+  AND status IN ('SUCCESS','FAILED','UNKNOWN','VALIDATION_FAILED','MAPPING_FAILED');
+```
+
+인증, 임의 민감 문자열 탐지, 보호된 원문 저장, 타임라인/통계/재시도/멱등성은 이번 Phase에 포함하지 않는다. Docker/원격 CI 검증의 미완료 상태는 PROGRESS에 별도로 남긴다.

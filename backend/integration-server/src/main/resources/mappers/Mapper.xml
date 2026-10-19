@@ -1,3 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="lab.interfaceflow.integration.RequestMapper"><insert id="insert">INSERT INTO integration.if_request(id,request_id,trace_id,attempt_id,status) VALUES(CAST(#{id} AS uuid),#{requestId},#{traceId},CAST(#{attemptId} AS uuid),'SENDING')</insert><update id="complete">UPDATE integration.if_request SET status=#{status},http_status=#{httpStatus},error_code=#{errorCode},updated_at=now() WHERE id=CAST(#{id} AS uuid) AND status='SENDING'</update></mapper>
+<mapper namespace="lab.interfaceflow.integration.RequestMapper">
+ <insert id="insert">
+  INSERT INTO integration.if_request(id,request_id,interface_id,trace_id,status,source_system,interface_version,original_payload,processing_stage)
+  VALUES(CAST(#{id} AS uuid),#{request.requestId},#{request.interfaceId},#{traceId},'VALIDATING',#{definition.sourceSystem},#{definition.version},CAST(#{original} AS jsonb),'SOURCE_VALIDATION')
+ </insert>
+ <update id="prepared">
+  UPDATE integration.if_request SET mapped_payload=CAST(#{mapped} AS jsonb),status=#{status},processing_stage=#{stage},
+  validation_errors=CAST(#{errors} AS jsonb),error_code=CASE WHEN #{status}='MAPPING_FAILED' THEN 'MAPPING_ERROR' WHEN #{status}='VALIDATION_FAILED' THEN 'VALIDATION_ERROR' ELSE NULL END,
+  duration_ms=#{duration},updated_at=now() WHERE id=CAST(#{id} AS uuid) AND status='VALIDATING'
+ </update>
+ <update id="sending">
+  UPDATE integration.if_request SET status='SENDING',attempt_id=CAST(#{attemptId} AS uuid),processing_stage='REQUEST_DISPATCHED',updated_at=now()
+  WHERE id=CAST(#{id} AS uuid) AND status='READY'
+ </update>
+ <update id="complete">
+  UPDATE integration.if_request SET status=#{status},http_status=#{httpStatus},error_code=#{errorCode},response_payload=CAST(#{response} AS jsonb),
+  processing_stage='RESPONSE_PROCESSED',duration_ms=#{duration},updated_at=now() WHERE id=CAST(#{id} AS uuid) AND status='SENDING'
+ </update>
+ <sql id="filter">
+  WHERE (#{query}='' OR position(lower(#{query}) in lower(request_id || ' ' || interface_id || ' ' || trace_id)) &gt; 0)
+  AND (#{status}='' OR status=#{status})
+ </sql>
+ <select id="history" resultType="string">
+  SELECT jsonb_build_object('id',id,'requestId',request_id,'interfaceId',interface_id,'traceId',trace_id,'attemptId',attempt_id,
+   'status',status,'interfaceVersion',interface_version,'processingStage',processing_stage,'errorCode',error_code,
+   'httpStatus',http_status,'durationMs',duration_ms,'createdAt',created_at)::text FROM integration.if_request
+  <include refid="filter"/> ORDER BY created_at DESC,id DESC LIMIT #{size} OFFSET #{offset}
+ </select>
+ <select id="count" resultType="long">SELECT count(*) FROM integration.if_request <include refid="filter"/></select>
+ <select id="detail" resultType="string">
+  SELECT jsonb_build_object('id',r.id,'requestId',r.request_id,'interfaceId',r.interface_id,'traceId',r.trace_id,'attemptId',r.attempt_id,
+   'status',r.status,'interfaceVersion',r.interface_version,'processingStage',r.processing_stage,'errorCode',r.error_code,
+   'httpStatus',r.http_status,'durationMs',r.duration_ms,'createdAt',r.created_at,'originalPayload',r.original_payload,
+   'mappedPayload',r.mapped_payload,'response',r.response_payload,'errors',r.validation_errors,'interfaceSnapshot',v.snapshot)::text
+  FROM integration.if_request r LEFT JOIN integration.if_interface_version v ON v.interface_id=r.interface_id AND v.version=r.interface_version
+  WHERE r.id=CAST(#{id} AS uuid)
+ </select>
+</mapper>

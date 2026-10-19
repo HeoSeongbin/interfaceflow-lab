@@ -18,7 +18,7 @@ public class TraceFilter extends OncePerRequestFilter {
   long start=System.nanoTime();
   try {
    if(req.getContentLengthLong()>65536){rejectOversize(res,trace);return;}
-   if("POST".equals(req.getMethod()) && req.getRequestURI().startsWith("/api/")) {
+   if(java.util.Set.of("POST","PUT","PATCH").contains(req.getMethod()) && req.getRequestURI().startsWith("/api/")) {
     byte[] body=req.getInputStream().readNBytes(65537);
     if(body.length>65536){rejectOversize(res,trace);return;}
     var wrapped=new HttpServletRequestWrapper(req){

@@ -39,3 +39,29 @@ Frontend: React 19.2, TypeScript 5.9, Vite 7.1, Vitest 3.2. Node 22.12+를 사�
 Docker Compose E2E CI 작업은 별도로 구성했으며, 로컬 Chrome 검증을 Docker/Testcontainers/원격 CI 성공으로 간주하지 않는다. Docker 검증이 남아 있으므로 Phase 2로 진행하지 않는다. 관련 코드: frontend/e2e, playwright.config.ts, scripts/Test-Smoke.ps1, ci.yml.
 
 근거: [Playwright configuration](https://playwright.dev/docs/test-configuration), [Chrome/Edge channels](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge).
+
+## ADR-007 · 2026-10-16 · Phase 2 진행과 버전 일관성
+
+상황: 사용자가 다음 Phase 진행을 명시적으로 요청했다. 로컬 HTTP/DB/브라우저 검증은 통과했으며 Docker 검증만 남아 있다. ADR-006의 Phase 2 보류 결정을 이번 요청에 따라 대체하되 Docker 검증을 완료로 바꾸지 않는다.
+
+선택지: 변경 가능한 설정만 보관 / 불변 버전 스냅샷과 요청 버전 참조. 결정: IF_SYSTEM/IF_INTERFACE/IF_INTERFACE_VERSION과 매핑·검증 테이블을 V2 migration으로 추가한다. 버전 snapshot JSONB가 실행 시 읽는 전체 정의이며, 개별 규칙 테이블도 같은 트랜잭션으로 저장한다. 수정은 현재 version 비교와 행 잠금을 함께 사용하고 stale 변경은 409로 거절한다.
+
+요청 접수는 짧은 트랜잭션 안에서 Interface 행의 FOR SHARE 잠금, 활성 확인, 설정 snapshot 읽기, 요청 저장을 수행한다. 설정 변경/삭제는 FOR UPDATE를 사용한다. HTTP는 접수 트랜잭션 커밋 후 실행하며, 변경 중인 설정이 전송 내용에 섞이지 않는다. 이력이 있으면 삭제 대신 새 비활성 버전을 저장하고 기존 버전은 FK로 보존한다. 장점은 재현성과 삭제/접수 경쟁의 안전성이며, snapshot과 규칙 projection을 함께 관리하는 저장 비용이 있다. 관련 코드: InterfaceService/InterfaceMapper, RequestLifecycle, V2 migration.
+
+실제 PostgreSQL 테스트로 동시 수정 200/409, 과거 snapshot 보존, HTTP 대기 중 설정 변경 완료를 검증한다. Phase 1 기록의 version/payload는 null로 보존한다.
+
+## ADR-008 · 2026-10-16 · 결정적 매핑과 단계별 검증
+
+선택지: 사용자 스크립트/범용 JSONPath / 제한된 객체 점 경로와 명시적 변환. 결정: 객체 점 경로(최대 16단계), COPY/STRING/NUMBER/BOOLEAN/DATE, 기본값과 Null 정책을 제공한다. 빈 매핑은 deep copy, 규칙이 있으면 명시한 대상 필드만 생성하여 필드 제거를 표현한다. 중복·상하위 대상 경로는 거절한다. 배열 인덱스/와일드카드/스크립트는 지원하지 않고 API 문서에 범위를 명시한다.
+
+Source Validation → Mapping → Target Validation을 분리한다. 실패 단계/필드/규칙을 저장하며 HTTP를 호출하지 않는다. Attempt ID는 검증 통과 후 실제 전송 직전에 발급한다. 입력과 변환 결과는 각각 64KiB로 제한하고 입력은 변경하지 않는다. JSON으로 직렬화된 defaultValue:null은 누락된 필수 source를 숨기지 않는다. 날짜는 Locale.ROOT, 엄격한 uuuu 패턴의 LocalDate/LocalDateTime을 사용한다. 숫자 Enum은 표현 대신 수치로 비교한다.
+
+사용자가 설정한 pattern에는 backtracking 정규식 대신 RE2/J 1.8을 사용한다. lookaround/역참조 등 미지원 문법은 설정 저장 단계에서 거절한다. 장점은 결정적이고 테스트 가능한 동작과 패턴 실행 시간의 예측 가능성이며, 범용 변환보다 표현력이 제한되는 단점이 있다. 관련 코드: PayloadEngine, InterfaceModels, PayloadEngineTest. [RE2/J 실행 모델](https://github.com/google/re2j).
+
+## ADR-009 · 2026-10-16 · 전문 이력과 데이터 최소화
+
+선택지: 원문 평문 저장 / 마스킹된 진단 snapshot 저장. 결정: Phase 2는 원본·변환·응답을 재귀 마스킹하여 JSONB로 저장한다. password/token/authorization/secret/api_key/email/ssn 등의 표준 키와 민감 source에서 이름이 바뀐 target 경로를 처리한다. 실제 HTTP 데이터는 변경하지 않는다. 필드명으로 식별할 수 없는 임의 문자열은 자동 판정할 수 없으므로 가상 데이터만 사용하고 설정 기본값에 비밀을 넣지 않는다.
+
+수동 재처리는 아직 없으므로 마스킹된 전문을 원본처럼 재전송하지 않는다. Phase 5에서 보호된 재처리 원본 보관 방식을 별도로 설계해야 한다. 권장 진단 이력 보관은 30일이며 이번 단계에서는 자동 삭제를 구현하지 않는다. 운영자가 필요 시 ARCHITECTURE의 terminal 이력 정리 SQL을 검토해 적용한다.
+
+조회는 내부 UUID를 사용하여 논리 Request ID의 고유성 범위와 혼동하지 않는다. 목록은 최대 100건/page이며 목록과 count는 짧은 REPEATABLE_READ 트랜잭션으로 읽는다. 검증/매핑 실패는 Attempt ID가 null이고 SENDING 이전 실패로 저장한다. 자동 재시도·멱등성·UNKNOWN 재처리 정책은 변경하지 않는다. 관련 코드: RequestLifecycle, RequestMapper, PayloadRedactor, TransmissionService.

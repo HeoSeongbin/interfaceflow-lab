@@ -6,7 +6,7 @@ import jakarta.validation.constraints.*;
 public final class Contracts {
     private Contracts() {}
     public record SendRequest(
-        @Pattern(regexp="IF-USER-001") @NotBlank String interfaceId,
+        @Pattern(regexp="[A-Za-z0-9_-]{1,80}") @NotBlank String interfaceId,
         @Pattern(regexp="[A-Za-z0-9_-]{1,80}") @NotBlank String requestId,
         @NotNull JsonNode payload) {
         @AssertTrue(message="payload must be a JSON object")
@@ -15,5 +15,8 @@ public final class Contracts {
     }
     public record TargetResponse(String code, String requestId, String traceId) {}
     public record SendResult(String id, String requestId, String traceId, String attemptId,
-        String status, Integer httpStatus, JsonNode response, String errorCode) {}
+        String status, Integer httpStatus, JsonNode response, String errorCode,
+        String processingStage, Integer interfaceVersion, JsonNode originalPayload,
+        JsonNode mappedPayload, java.util.List<FieldError> errors) {}
+    public record FieldError(String field, String rule, String message, String stage) {}
 }

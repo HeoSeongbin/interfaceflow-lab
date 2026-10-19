@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class HttpContractTest {
     @Autowired MockMvc http;
     @MockitoBean TransmissionService service;
+    @MockitoBean RequestLifecycle lifecycle;
 
     @Test void invalidJsonHasStableErrorAndGeneratedTrace() throws Exception {
         http.perform(post("/api/requests").contentType("application/json").content("{"))

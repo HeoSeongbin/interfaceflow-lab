@@ -4,65 +4,66 @@
 
 ## 현재 Phase
 
-Phase 0 설계 완료. Phase 1 구현과 로컬 Java/HTTP/PostgreSQL/Chrome 검증 완료. 이번 후속 작업에서는 Phase 1 HTTP 오류 경계와 실제 브라우저·DB 검증을 보강했다. Docker Compose/Testcontainers 실행 검증은 여전히 남아 있으므로 Phase 1 전체 검증 완료로 표시하지 않는다. Phase 2 이후 기능은 구현하지 않았다.
+**Phase 2 — 인터페이스 및 전문 관리 구현·로컬 검증 완료.** 사용자의 다음 Phase 진행 요청에 따라 진행했다. Phase 1의 Docker Compose/Testcontainers/원격 CI 미검증 항목은 그대로 남기며 성공으로 바꾸지 않는다. Phase 3 이상의 타임라인·통계·장애·재시도·멱등성은 구현하지 않았다.
 
-## 완료한 작업
+## 완료 기능
 
-- 빈 작업 폴더와 Git 미초기화 상태 확인. 기존 코드·변경 사항 없음.
-- 원본 최종 요구사항 PROJECT.md 보존, AGENTS/README/PROGRESS/DECISIONS와 아키텍처·API·테스트 문서 작성.
-- Java 21 Maven 멀티모듈(common DTO, integration-server, target-simulator), Spring Boot 3.5.7.
-- React TypeScript Vite 전송 콘솔. 샘플·JSON 객체 검사·요청 크기 검사·로딩·오류·결과·다크/라이트·반응형 기본 레이아웃.
-- 고정 IF-USER-001 대상 라우팅, RestClient 실제 JSON HTTP 송수신, 기본 응답 계약 검사.
-- Trace/Request/Attempt HTTP 헤더, MDC 정리, JSON 로그. 요청 전문은 로그에 출력하지 않음.
-- PostgreSQL 서비스별 스키마와 Flyway migration, MyBatis XML Mapper, 요청 결과·수신 메타데이터 영속화.
-- 64KB 입력 제한 (Content-Length 및 실제 읽은 크기 모두 검사), 로컬 포트 바인딩, env 기반 암호.
-- Actuator health, OpenAPI, Dockerfiles/Compose/Nginx, GitHub Actions, 별도 JVM smoke 스크립트.
-- 누락 헤더·잘못된 UUID는 400으로 차단, 표준 MVC 오류의 HTTP 상태/Allow 헤더 보존, 413 JSON 오류와 Trace ID 일관화.
-- HTML 게이트웨이 오류와 파싱 불가 JSON의 HTTP 상태·사용자 피드백. 원문 오류 응답은 화면에 그대로 출력하지 않음.
-- Playwright 타입 검사 및 실제 두 JVM/DB 기반 전송·식별자 대조, 데스크톱/모바일 너비·테마·키보드 검증. smoke -BrowserTests와 선택한 화면 캡처 보존.
-- Docker Compose 전체 스택의 Chromium/DB 검증 CI 작업 구성. Docker backend 빌드도 동일한 Maven Central 설정 사용.
+- V2 Flyway: IF_SYSTEM, IF_INTERFACE, IF_INTERFACE_VERSION, IF_FIELD_MAPPING, IF_VALIDATION_RULE, 요청 전문/설정 버전/검증 오류/소요시간 확장. 기존 V1 요청 보존.
+- 인터페이스 등록/검색/조회/전체 수정/활성 상태/삭제 정책, SOURCE 시스템 등록과 대상 허용 목록. 고정 샘플 라우팅을 DB 정의 기반으로 교체.
+- 버전 스냅샷과 규칙의 원자적 저장, stale version 409, 동시 수정 제어. 요청 접수 시 불변 정의 버전을 고정한다.
+- Source 검증 → 필드 매핑 → Target 검증. 필드명/중첩 객체/기본값/추가·제거/숫자·문자·Boolean·날짜/Null 정책. 입력 불변, 결정적 결과, 경로 충돌 검사.
+- 필수·타입·문자열 길이·숫자 범위·Enum·날짜·RE2 pattern·Null·중첩 경로 검사. HTTP JSON 소수는 BigDecimal로 읽어 경계값 정밀도를 보존.
+- 실제 전송 전에 검증/매핑 실패를 저장하고 대상 호출을 차단. Attempt ID는 실제 전송 직전에만 생성한다. Request/Trace/Attempt 역할은 유지한다.
+- 미리보기 API는 DB 현재 버전으로 검증·매핑만 수행하며 HTTP/요청/Attempt/이력을 만들지 않는다.
+- 원본·변환·응답 진단 JSON 재귀 마스킹. 민감 source의 이름이 바뀐 target도 마스킹하며 실제 HTTP 값은 변경하지 않는다. 입력/변환 결과 각각 64KiB 제한.
+- Request/Interface/Trace 검색·상태·페이지 기반 이력과 내부 UUID 상세, 접수 당시 설정 snapshot. Phase 1의 null 전문/버전은 추정값으로 덮어쓰지 않는다.
+- React 인터페이스 관리/규칙 JSON 편집/버전 조회/출발 시스템 등록/미리보기/전송 이력 화면, 모바일 메뉴와 표 내부 가로 스크롤.
 
 ## 테스트 결과
 
-실행 도구: 프로젝트 무시 경로 .tools에 임시 Java 21/Maven/PostgreSQL 17.6을 준비했다. 시스템 서비스 설치는 하지 않았다. 시스템 기본 Java는 26이며 Maven/Docker는 PATH에 없었다.
+기존 .tools의 Java 21/Maven/PostgreSQL 17.6을 사용했다. 사용자 서비스의 5173/8080/8081은 종료하지 않고 별도 임시 DB 55432와 smoke 18080/18081, Vite 15173을 사용했다.
 
-- Java 21 Maven verify: **22건 성공, 실패/오류/skip 0**. 핵심 서비스 테스트 7건(HTTP 왕복·오류·Timeout·DB 접수 실패·DTO), 양쪽 HTTP 계약 9건, Content-Length 없는 크기 경계/MDC 테스트 2건, 실제 PostgreSQL 통합 4건.
-- PostgreSQL 통합: Integration HTTP/실제 DB 상태·미등록 인터페이스 차단, 64KB 제한, Target HTTP/실제 수신 이력 저장, 잘못된 Attempt ID 400 및 수신 기록 0건. TEST_DB_URL 외부 임시 PostgreSQL 경로 사용.
-- 별도 JVM smoke: 두 실행 JAR와 실제 PostgreSQL로 SUCCESS/HTTP 200, Request/Trace/Attempt 식별자, 동일 Trace 응답 헤더, Actuator DB UP, OpenAPI 확인 성공.
-- frontend Vitest: **5건 성공**. JSON 객체 검사와 JSON/HTML/파싱 오류 응답 처리.
-- frontend TypeScript/Vite 배포 빌드: 성공.
-- Playwright E2E: **12건 성공**, 별도 TypeScript 검사 통과. 6개 시나리오 × Chrome 데스크톱 1440px / 모바일 너비 390px. 정상 전송의 세 식별자가 Integration/Target DB 기록과 일치. 전송 중 버튼 비활성화·JSON 오류·샘플·네트워크/HTML 오류·테마·키보드·가로 넘침 확인.
-- 데스크톱 다크, 모바일 너비 다크/라이트 캡처 직접 시각 확인. 선택 이미지 docs/screenshots 보존. 실제 모바일 기기/별도 모바일 엔진 검증은 아님.
-- Testcontainers Docker 경로: 코드 구성, 미실행. CI에서 RUN_DB_TESTS=true로 실행하도록 구성했으나 원격 Actions는 미실행.
-- Docker Compose 실행: Docker 미설치로 미실행. 새 compose-e2e CI 작업도 원격 실행하지 않았으므로 성공으로 표시하지 않음.
+- **Maven verify: 51건 성공**, 실패/오류/skip 0. Integration 43건 + Target 8건.
+- Integration 구성: 실제 PostgreSQL 통합 14, 엔진/마스킹 17, 전송 HTTP 서비스 7, HTTP 계약 3, 입력 크기/MDC 경계 2.
+- Target 구성: 실제 PostgreSQL 통합 2 + HTTP 계약 6.
+- DB 검증: V1→V2 migration, CRUD·버전·규칙 endpoint, Source/Mapping/Target 실패 구분과 대상 미호출, 마스킹/실제 HTTP 값 분리, 삭제/비활성화, 검색/페이지, 동시 수정 200/409, HTTP 대기 중 설정 변경과 이전 버전 전송, 반복 논리 ID의 별도 요청 기록, JSON 소수 경계 정밀도.
+- **프론트엔드 Vitest 5건 성공**, TypeScript/Vite 배포 빌드 성공.
+- **Playwright 타입 검사 및 Chrome E2E 18건 성공**: 9개 시나리오 × desktop 1440px/mobile 너비 390px. 정상 전송/양쪽 DB 식별자·전문 대조, 미리보기, 검증 실패 미수신, UI 등록·v2 수정·매핑 전송·이력·비활성화, 기존 JSON/로딩/오류/테마/키보드 검증.
+- 캡처를 직접 확인하고 모바일 표의 글자 단위 줄바꿈을 수정했다. phase2-sender/interfaces/history-mobile PNG 보존. 실제 모바일 기기/다른 브라우저 엔진 검증은 아님.
+- Docker Compose/Testcontainers 경로·원격 GitHub Actions: **미실행**. 환경에 Docker 실행 파일이 없으며 이 검증을 로컬 JVM/DB 성공으로 대체하지 않는다.
 
-## 해결한 문제와 결정
+## 해결한 문제
 
-- 네트워크 샌드박스의 npm/Maven DNS 차단: 승인받은 다운로드·빌드로 검증.
-- 네이티브 Rollup 실행 차단: 승인받은 외부 빌드 성공.
-- 로컬 Maven/JDK 21 부재: .tools 내부에 검증용 도구 준비.
-- DB 테스트 생성 중 잘못된 문자열 치환: 수정 후 실제 컴파일·DB 테스트 통과.
-- 샌드박스 PostgreSQL 초기화 정체: 해당 프로세스를 중단하고 승인된 별도 임시 데이터 폴더로 검증.
-- ADR-001~004: 호환 버전, RestClient/트랜잭션 경계, UNKNOWN 상태, 식별자 분리, 서비스별 DB·전문 로그 제외.
-- 포괄 예외 handler가 HTTP 415를 500으로 바꾸고 413 JSON을 누락하는 문제를 테스트로 재현한 뒤 수정. Target UUID 구문 검증으로 잘못된 값의 DB 캐스팅·수신 기록을 차단.
-- E2E 최초 실행의 DB 연결 사용자 옵션 문제(10건 성공/2건 실패): pg의 connectionString 파싱으로 별도 옵션이 덮이는 문제를 URL 구성으로 수정. 최종 12건 모두 성공.
-- ADR-005~006: 표준 HTTP 오류 계약, 실제 브라우저·DB 대조와 오류 주입 검증 범위. Request/Trace/Attempt 의미와 재시도/멱등성 단계 범위는 변경하지 않음.
+- 신규 migration의 dollar 인용부와 JSON 시작 문자가 Flyway placeholder로 오인됨: 신규 V2 적용 전 SQL 단일 인용으로 수정, 실제 migration 성공.
+- 직렬화된 defaultValue:null이 누락된 필수 매핑을 생략시킴: 유효한 기본값과 NullNode를 구분, MAPPING_FAILED 회귀 검증.
+- 매핑으로 원본 필드를 복제해 64KiB를 초과할 수 있음: 출력 크기도 검사하고 전송/과대 전문 저장 차단.
+- 숫자 Enum의 노드 표현 차이와 JSON Double 반올림: BigDecimal 수치 비교 및 HTTP 소수 보존, 실제 경계 테스트.
+- 모바일 이력 표의 극단적인 줄바꿈: 내부 가로 스크롤과 최소 열 폭, 페이지 자체 가로 넘침 없음 확인.
 
-## 미완료 기능과 제약
+## 주요 결정
 
-고정 인터페이스 외 CRUD, 필드 매핑·Source/Target 필드 스키마, 전문 원문 저장, 설정 버전, 이력 조회·Trace Explorer·대시보드, 장애 시나리오, 멱등성·재시도·복구, 인증은 후속 Phase다. 현재 반복 Request ID는 중복 실행되며 SENDING 중 종료 시 자동 복구되지 않는다. 원본 요구를 삭제하거나 축소한 것이 아니라 단계 범위상 대기 상태다.
+ADR-007: 요청 접수의 공유 잠금/짧은 트랜잭션, 불변 설정 버전, 삭제/수정 일관성. ADR-008: 결정적 객체 경로 매핑·단계 검증·RE2. ADR-009: 마스킹된 진단 snapshot과 보관/재처리 한계. HTTP는 DB 트랜잭션 밖에서 실행하며 retry/멱등성을 제공한다고 주장하지 않는다.
 
-## 이번 후속 작업 변경 파일
+## 변경 파일
 
-- 양쪽 서버: `ApiErrors.java`, `TraceFilter.java`, 새 `HttpContractTest.java`.
-- Integration: 새 `src/test/java/lab/interfaceflow/integration/TraceFilterTest.java`.
-- Target: `ReceiveController.java`, `DatabaseIntegrationTest.java`.
-- Frontend: `src/main.tsx`, 새 `src/http.ts`, `src/http.test.ts`, `e2e/console.spec.ts`, `playwright.config.ts`, `tsconfig.e2e.json`, `vite.config.ts`, `package.json`, `package-lock.json`.
-- 실행/CI: `scripts/Test-Smoke.ps1`, `docker/backend.Dockerfile`, `.github/workflows/ci.yml`, `.gitignore`, `.dockerignore`.
-- 문서: `README.md`, `docs/PROGRESS.md`, `docs/DECISIONS.md`, `docs/API.md`, `docs/TEST-SCENARIOS.md`, `docs/screenshots/phase1-desktop.png`, `phase1-mobile.png`, `phase1-mobile-light.png`.
-- 최종 요구사항 PROJECT.md와 기존 상태/재시도/멱등성 정책은 변경하지 않았다. Git 저장소가 아직 없어 Git diff 대신 작업 파일과 실행 결과를 직접 대조했다.
+- Backend common Contracts: 동적 Interface ID와 확장된 전송 결과/필드 오류 DTO.
+- Integration: ApiController/ApiErrors/RequestMapper/TraceFilter/TransmissionService 수정. InterfaceModels/Mapper/Service/Controller, ApiProblem, PayloadEngine/Redactor, RequestLifecycle 추가.
+- V2 migration, InterfaceMapper XML, 요청 Mapper XML, application.yml, integration pom.xml(RE2/J).
+- 테스트: PayloadEngineTest/TestDefinitions 추가, DatabaseIntegrationTest/TransmissionServiceTest/HttpContractTest와 frontend/e2e 확장.
+- Frontend: api.ts, InterfaceManagement.tsx, History.tsx 추가, main.tsx/style.css 수정.
+- 문서: PROJECT 후반 현재 범위 추가, README/API/ARCHITECTURE/DECISIONS/PROGRESS/TEST-SCENARIOS 최신화, Phase 2 화면 3개 추가.
+- 기존 사용자 .idea 파일과 PROJECT의 Phase 7 제목 편집을 보존했다. 커밋/사용자 실행 서비스 재시작은 이번 요청에 포함하지 않았다.
+
+## 남은 제약
+
+객체 점 경로만 지원하며 배열 인덱스·와일드카드·스크립트·시간대 날짜 변환은 미지원이다. 규칙 편집은 JSON 편집기이며 시각적 매핑 빌더는 없다. 응답 스키마는 기존 OK/식별자 계약이며 사용자 정의 응답 스키마는 후속 확장이다.
+
+Source/Target 멱등성, 재시도, 서버 중단 복구, 전체 Trace 이벤트와 별도 Attempt 테이블, 대시보드/기간 차트, 장애 시나리오, 인증은 미구현이다. 동일 논리 Request ID는 현재 별도 실행된다. 진행 중 종료되면 VALIDATING/READY/SENDING이 남을 수 있다.
+
+진단 전문은 마스킹되어 원본 재처리에 사용할 수 없다. 자동 보관기간 정리도 아직 없으며 권장 30일 수동 운영 절차만 문서화했다. 설정 기본값에 비밀을 넣지 않으며 임의 문자열의 민감성을 자동 판정하지 않는다.
 
 ## 다음 작업
 
-1. Docker가 있는 환경에서 Compose config/build/up, Testcontainers 경로, Compose 기반 E2E 검증. 필요 시 새 compose-e2e CI를 실행하고 실제 결과 기록. Docker 설치/엔진이 없는 현재 환경에서 이 항목을 완료로 처리하지 않음.
-2. Phase 1 미검증 항목을 해소한 뒤 Phase 2: 인터페이스/버전/매핑/검증 스키마와 API 계약 확정, CRUD와 전문 변환·이력 구현.
+1. Docker 가능한 환경에서 Compose config/build/up, Testcontainers, Compose E2E 및 원격 CI를 실제 실행하고 결과 기록.
+2. 다음 개발 단계는 **Phase 3 — 추적 및 모니터링**: 단계별 Trace 이벤트, 별도 Attempt 관리, Trace Explorer, History 확장, 실제 DB 집계 대시보드. Phase 2 동작을 회귀 테스트로 유지한다.
+3. Phase 4 장애와 Phase 5 멱등성/재시도/복구를 앞당겨 구현하지 않는다.

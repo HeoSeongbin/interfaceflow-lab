@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lab.interfaceflow.integration.InterfaceMapper">
+  <select id="systems" resultType="lab.interfaceflow.integration.InterfaceModels$SystemInfo">
+    SELECT system_id,system_name,role FROM integration.if_system ORDER BY system_id
+  </select>
+  <insert id="insertSystem">INSERT INTO integration.if_system(system_id,system_name,role) VALUES(#{systemId},#{systemName},#{role})</insert>
+  <select id="role" resultType="string">SELECT role FROM integration.if_system WHERE system_id=#{id}</select>
+  <sql id="snapshotQuery">SELECT v.snapshot::text FROM integration.if_interface i JOIN integration.if_interface_version v ON v.interface_id=i.interface_id AND v.version=i.current_version</sql>
+  <select id="snapshots" resultType="string">
+    <include refid="snapshotQuery"/>
+    WHERE #{query}='' OR position(lower(#{query}) in lower(i.interface_id || ' ' || i.interface_name)) &gt; 0
+    ORDER BY i.interface_id
+  </select>
+  <select id="snapshot" resultType="string"><include refid="snapshotQuery"/> WHERE i.interface_id=#{id}</select>
+  <select id="lock" resultType="string">SELECT interface_id FROM integration.if_interface WHERE interface_id=#{id} FOR UPDATE</select>
+  <select id="shareLock" resultType="string">SELECT interface_id FROM integration.if_interface WHERE interface_id=#{id} FOR SHARE</select>
+  <insert id="insert">
+    INSERT INTO integration.if_interface(interface_id,interface_name,source_system,target_system,enabled,current_version)
+    VALUES(#{interfaceId},#{interfaceName},#{sourceSystem},#{targetSystem},#{enabled},#{version})
+  </insert>
+  <update id="update">
+    UPDATE integration.if_interface SET interface_name=#{definition.interfaceName},source_system=#{definition.sourceSystem},
+    target_system=#{definition.targetSystem},enabled=#{definition.enabled},current_version=#{definition.version},updated_at=now()
+    WHERE interface_id=#{definition.interfaceId} AND current_version=#{expected}
+  </update>
+  <insert id="insertVersion">INSERT INTO integration.if_interface_version(interface_id,version,snapshot) VALUES(#{id},#{version},CAST(#{snapshot} AS jsonb))</insert>
+  <insert id="insertMapping">INSERT INTO integration.if_field_mapping(interface_id,version,position,rule) VALUES(#{id},#{version},#{position},CAST(#{rule} AS jsonb))</insert>
+  <insert id="insertValidation">INSERT INTO integration.if_validation_rule(interface_id,version,position,rule) VALUES(#{id},#{version},#{position},CAST(#{rule} AS jsonb))</insert>
+  <select id="hasRequests" resultType="boolean">SELECT EXISTS(SELECT 1 FROM integration.if_request WHERE interface_id=#{id})</select>
+  <delete id="delete">DELETE FROM integration.if_interface WHERE interface_id=#{id}</delete>
+  <select id="versions" resultType="string">SELECT snapshot::text FROM integration.if_interface_version WHERE interface_id=#{id} ORDER BY version DESC LIMIT 50</select>
+</mapper>
