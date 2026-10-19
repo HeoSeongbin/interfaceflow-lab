@@ -33,6 +33,7 @@ services:
     environment:
       <<: *db-env
       TARGET_URL: http://target:8081
+      REPLAY_KEY: ${REPLAY_KEY:?Set a stable base64 32-byte REPLAY_KEY in .env}
       CONNECTION_FAILURE_URL: ${CONNECTION_FAILURE_URL:-http://127.0.0.1:1}
     ports: ["127.0.0.1:8080:8080"]
     depends_on:

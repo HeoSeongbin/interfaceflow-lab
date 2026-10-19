@@ -13,6 +13,7 @@ jobs:
       - run: mvn -B -s .mvn/settings.xml verify
         env:
           RUN_DB_TESTS: 'true'
+          REPLAY_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -32,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      REPLAY_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       DB_USER: interfaceflow
       DB_PASSWORD: ci-disposable-database
       E2E_BASE_URL: http://127.0.0.1:5173

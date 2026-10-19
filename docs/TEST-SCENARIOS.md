@@ -54,3 +54,15 @@ PROJECT.md 18절의 12개 시나리오를 순서대로 자동화한다. 특히 t
 - 기존 매핑·버전·동시 수정·마스킹·Trace·대시보드 및 HTTP 오류·입력 제한 회귀 유지.
 
 실행 결과와 미검증 환경은 PROGRESS에 기록한다.
+
+## Phase 5 신뢰성 검증
+
+- Canonical JSON: 객체 키/동등 숫자 표기 정규화, 배열 순서·타입 차이 보존. Replay: 임의 nonce, UUID AAD 인증, 키 누락/다른 UUID 거절. 오류 분류/backoff 한도 단위 검사.
+- 실제 DB: 동일 논리 키의 동시 접수 409, 최종 결과 UUID/Trace/헤더 재사용, 다른 전문 409, HTTP 대기 중 잠금 비유지. 암호문/조회 정보의 원문 미노출.
+- lease 만료 복구: 이전 Attempt UNKNOWN, 새 UUID/같은 Trace, 오래된 token의 완료 거절. 자동 한도 소진, 병렬 수동 예약 하나만 성공, 성공 후 추가 재시도 거절.
+- Target: 동일 키 병렬 6회에서 업무 결과 한 건/추가 replay receipt, 다른 본문 409, 다른 출처의 같은 Request ID는 독립 결과.
+- Capability 미확인 시 업무 POST 없음·DEAD_LETTER, 프로토콜 복구 후 수동 실행 성공.
+- 실제 두 JVM·Chrome desktop/mobile: FAIL_THEN_SUCCESS 자동 재시도, TIMEOUT/INVALID_RESPONSE의 저장된 업무 결과 재사용, UUID/Trace 유지·Attempt 증가·Target 업무 한 건. Retry Center의 수동 추가 예약·성공 후 비활성·모바일 화면 확인. 기존 수동 실험과 정상 전송·매핑·이력·Trace·통계 회귀 유지.
+- `node scripts/Test-Recovery.mjs`: Target 업무 커밋 직후 Integration JVM 강제 종료, 재시작·실제 60초 lease 만료 후 성공, Attempt UNKNOWN→SUCCESS, 같은 Trace와 업무 결과 한 건을 실제 DB로 확인. 자신이 만든 JVM만 종료.
+
+Docker/Testcontainers/원격 CI 실행 여부는 PROGRESS와 구분한다. DB lease 시간을 앞당기는 통합 테스트와 실제 프로세스 재시작 검증은 별도 근거다.

@@ -87,3 +87,27 @@ Target은 scope/만료/최대 20회 수신을 조건으로 한 UPDATE RETURNING�
 연결 실패는 응답 코드로 흉내 내지 않는다. CONNECTION_FAILURE만 서버 설정 CONNECTION_FAILURE_URL(기본 loopback port 1)로 실제 HTTP를 시도한다. UI/API에 URL 입력은 없다. 해당 주소가 닫혀 있어야 실제 접속 실패가 재현되며, Target 제어 API는 먼저 정상 접근 가능해야 한다. Target에 도달하지 않아 수신 counter/receipt가 없고 Integration Attempt는 UNKNOWN/TARGET_IO_ERROR다. 이 경로의 실행 횟수는 Target 수신 한도에 포함되지 않는다. Target에서 이 유형을 직접 수신하면 400으로 거절한다.
 
 HTTP 400/중복 409는 FAILED, HTTP 500/Timeout/I/O/잘못된 응답은 UNKNOWN을 유지한다. Timeout이어도 Target 수신 기록은 존재할 수 있으며 자동 성공/실패 보정은 하지 않는다. SIMULATIONS_ENABLED=false로 Target의 제어·실행을 비활성화할 수 있다. 동기 지연은 bounded servlet thread를 점유하며 작업 큐·인증·재시도/멱등성·종료 복구는 후속 범위다. 장점은 다른 전송과의 격리 및 재현성이고 비용은 제어용 HTTP 왕복과 시나리오/수신 보관이다. 관련 코드: 양쪽 SimulationController, Target SimulationService/Mapper, RequestLifecycle, TransmissionService, Target ReceiveController.
+
+## ADR-012 · 2026-10-19 · 업무 멱등성과 보호된 재처리 원본
+
+상황: 기존 전문은 마스킹되어 재처리 원본으로 사용할 수 없고, 단순 HTTP 재시도는 Timeout 이후 중복 처리를 유발한다. 선택지: 평문 재전송 원본 / 마스킹 값 재사용 / 외부 키로 암호화한 원본. 결정: Integration V5 IF_DELIVERY의 UNIQUE(interface_id, source_system, request_id, scope)를 논리 등록으로 사용한다. 일반 전송 scope는 normal, 신뢰성 실험은 불변 시나리오 UUID다. Phase 4 수동 execute는 계속 독립 실험이고 이 등록을 우회한다. 과거 IF_REQUEST의 중복 데이터는 추정 병합하거나 재처리 가능하게 바꾸지 않는다.
+
+Source는 객체 키 정렬·숫자 표기 정규화·배열 순서 보존의 SHA-256으로 원본 전문을 비교한다. 같은 키/같은 전문은 기존 요청/Trace/결과를 반환하고 진행/대기 중이면 409, 다른 전문은 PAYLOAD_CONFLICT 409다. 설정 행 공유 잠금과 짧은 등록 트랜잭션 안에서 고유키·요청·설정 버전·검증 결과·암호화 원본을 함께 저장한다. 외부 HTTP는 없다. 최초 유효 요청은 등록 트랜잭션에서 첫 lease/Attempt까지 배정해 poll worker가 먼저 실행하는 경쟁을 방지한다. 요청의 논리 출처는 인터페이스 정의의 sourceSystem이며 호출자가 임의 출처 헤더로 바꾸지 않는다.
+
+Replay envelope는 원본 요청·불변 Definition·불변 Scenario다. AES-256-GCM, 매 암호화의 임의 96-bit nonce, 내부 요청 UUID AAD를 적용한다. 키는 DB/브라우저/로그가 아닌 REPLAY_KEY 환경 변수의 base64 32바이트다. 누락 시 신규 일반 전송은 503으로 롤백하고 잘못된 형식은 시작 시 거절한다. 키를 재시작 사이에 유지해야 하며 자동 키 회전은 구현하지 않는다. 원본은 암호화 컬럼에서만 읽고 공개 조회는 기존 마스킹 snapshot만 제공한다. 키 복구 전 원본 인증에 실패하면 UNKNOWN/DEAD_LETTER로 정지하며 마스킹 값을 재전송하지 않는다.
+
+Target V3 IF_BUSINESS_RESULT는 같은 복합 키의 UNIQUE와 변환 후 canonical hash, 저장된 OK 업무 결과를 가진다. 짧은 DB 트랜잭션의 키별 advisory lock과 PK로 업무 결과/receipt를 원자적으로 기록한다. 동일 hash면 저장 결과를 재사용하고 replay receipt만 추가하며 다른 hash는 409다. 정상 결과는 지연·잘못된 응답을 보내기 전에 커밋되므로 Timeout 이후 재전달은 업무를 다시 처리하지 않는다. 500/400 실패에는 성공 업무 결과를 만들지 않는다. Trace는 현재 상관 헤더로 응답하며 업무 결과를 재사용한다. 업무 모델은 가상 OK 결과 기록이며 실제 외부 업무 시스템까지 exactly-once를 보장한다고 주장하지 않는다.
+
+Source 작업자는 매 dispatch 전 /api/capabilities의 interfaceflow-v1 프로토콜을 확인하고 X-Idempotency-Scope/X-Source-System을 전파한다. 미확인/미지원이면 업무 POST 없이 UNKNOWN/DEAD_LETTER로 정지한다. 제어 접속 오류는 제한된 재시도 대상으로 둔다. 캐시된 최종 Source 결과 조회는 Target 접속을 요구하지 않는다. Target scope 헤더가 없는 Phase 4 수동 실험은 업무 멱등성을 활성화하지 않는다. 모든 대상은 서버 허용 목록과 운영자가 지정한 주소이며 인증은 여전히 미구현이다.
+
+## ADR-013 · 2026-10-19 · 영속 재시도·lease·fencing과 상태 의미
+
+선택지: HTTP 요청 안의 sleep loop / DB due time과 lease 작업자. 결정: IF_DELIVERY의 WAIT/LEASED/DONE/DEAD_LETTER가 실행 상태이고 IF_REQUEST.status는 마지막 처리 결과(UNKNOWN을 확정 FAILED로 바꾸지 않음)다. retryMaxAttempts는 최초 시도를 포함한 총 자동 시도 한도 1~5다. 500ms부터 지수 증가(최대 30초), 구간 50~100% jitter로 next_at을 저장한다. 400/409/검증·매핑 실패는 재시도하지 않고 408/429/5xx/I/O/응답 계약 오류는 멱등성 프로토콜을 전제로 제한적으로 재시도한다.
+
+짧은 트랜잭션에서 delivery 행을 잠그고 60초 lease/token, 단조 증가 시도 순번과 새 Attempt UUID, SENDING을 저장한다. HTTP 및 지연은 밖에서 실행한다. 완료는 token·상태·미만료 lease를 다시 확인해 오래된 작업자의 결과 덮어쓰기를 차단한다. worker는 최초 Request ID/Trace ID/정의 버전을 유지하며 설정 변경을 섞지 않는다. MDC는 저장된 Trace/Request/Attempt로 설정하고 이전 컨텍스트를 복원한다. 매 poll 최근 due 20개를 순차 처리하므로 대량 처리 용량 최적화는 Phase 6다.
+
+프로세스가 죽으면 만료 lease의 이전 Attempt를 UNKNOWN/LEASE_EXPIRED로 닫고 예산 내에서 새 Attempt를 배정한다. 예산이 소진되면 DEAD_LETTER로 두며 마지막 요청 결과는 UNKNOWN일 수 있다. 복구에 lease가 실제로 만료되어야 하고 즉시 재시작으로 이전 작업을 빼앗지 않는다. 본 구현의 네트워크 timeout/지연 상한보다 60초가 길며 별도 heartbeat 연장은 없다. 늦은 Target 수신은 Target 고유키로 보호한다.
+
+수동 retry는 DONE/DEAD_LETTER의 재시도 가능한 오류만, 원본 복호화 확인 후, 동일 행 잠금으로 WAIT를 한 번 예약한다(동시 호출 하나만 성공). 자동 소진 후 한 번씩 추가 허용하되 절대 총 10회다. 성공/영구 오류/검증 오류/실행 중/대기 중/기존 원본 없는 이력은 거절한다. 원본 키 장애나 프로토콜 미확인은 자동 전송 없이 DEAD_LETTER에 두고 운영 조치 후 수동 예약한다. 설정/원본 편집 재처리는 없고 수정 전문은 새 Request ID로 접수한다.
+
+보관: 현재 자동 삭제는 없으며 idempotency 기록과 보호 키 보관 범위 내에서 보장한다. 기존 수동 요청 정리 SQL은 IF_DELIVERY도 FK cascade로 제거하므로 실행 전에 키/재처리 보관 정책을 확인해야 한다. Target 업무 결과를 임의 삭제하면 중복 방지 보장도 사라진다. 관련 코드: DeliveryStore/Mapper, ReliableDelivery, ReplayCipher, RetryController, BusinessService/Mapper, Test-Recovery.mjs.

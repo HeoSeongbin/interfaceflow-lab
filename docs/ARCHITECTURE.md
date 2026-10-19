@@ -102,3 +102,11 @@ Target V2는 IF_SIMULATION과 수신 기록의 simulation_id/sequence/planned_ht
 Integration V4는 request.simulation_id를 보관한다. 양쪽 서비스는 HTTP로 시나리오를 공유하며 Target schema를 Integration에서 직접 읽지 않는다. 등록/목록/실행 준비용 RestClient는 연결·응답 제한 3초이고, 전문 전송은 기존 인터페이스 timeout을 유지한다. execute 시 접수 트랜잭션 안에서 실제 설정 버전과 TIMEOUT 지연을 검사한다. 일반 send 경로에는 시나리오 헤더를 추가하지 않는다.
 
 CONNECTION_FAILURE 전송은 운영자가 지정한 닫힌 주소로만 라우팅하고 Target 제어 경로는 정상이어야 한다. 수신 횟수 제한은 Target 도달에 적용되므로 이 경로에는 counter/receipt가 없다. 인증·큐·동시 실행의 전체 용량 제어·retry/멱등성은 구현하지 않았다. 상태 정책과 상세 한계는 ADR-011을 따른다.
+
+## Phase 5 영속 실행
+
+Source IF_DELIVERY는 역사 IF_REQUEST에 대한 별도 논리 고유키 등록, canonical hash, AES-GCM replay envelope, 실행 상태/due time/lease token/시도 한도를 가진다. 기존 이력은 합성 등록하지 않는다. 입력 검증/정의 고정/보호 원본 등록은 같은 짧은 트랜잭션이다. worker는 lease와 새 Attempt를 커밋한 후 HTTP를 수행하고 소유 token·미만료를 확인해 결과를 커밋한다. 자동 재시도는 DB 시각으로 다시 검색하므로 서버 재시작으로 대기 스케줄을 잃지 않는다.
+
+Target IF_BUSINESS_RESULT는 출처/인터페이스/Request/namespace 고유키와 변환 전문 hash, OK 업무 결과를 가진다. 키별 advisory lock은 Target의 짧은 DB 처리만 직렬화하며 응답 지연 동안 해제된다. Target 업무 결과·수신 기록이 커밋된 뒤 응답이 손실돼도 후속 전송은 replay receipt만 추가한다. scope 없는 수동 장애 실험은 이 업무 테이블을 사용하지 않는다.
+
+DB 키·마스킹 진단·암호화 원본·Target 결과의 보관 범위는 다르다. 자동 삭제/키 회전은 미구현이며 기존 30일 수동 요청 삭제 SQL은 재처리/Source 고유키도 삭제한다. 적용 전에 양쪽 idempotency horizon과 키 백업 정책을 확인한다. 실행 상태와 마지막 결과 분리, 60초 lease, fencing, 재시도/수동 제한 및 실제 JVM 복구 검증 절차는 ADR-012/013과 scripts/Test-Recovery.mjs에 있다.

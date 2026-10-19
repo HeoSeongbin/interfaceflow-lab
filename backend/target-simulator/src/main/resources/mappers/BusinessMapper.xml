@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lab.interfaceflow.target.BusinessMapper">
+ <select id="lock" resultType="string">SELECT pg_advisory_xact_lock(hashtextextended(#{key},0))::text</select>
+ <select id="hash" resultType="string">SELECT payload_hash FROM target.if_business_result WHERE interface_id=#{r.interfaceId} AND source_system=#{source} AND request_id=#{r.requestId} AND scope=#{scope}</select>
+ <insert id="insert">INSERT INTO target.if_business_result(interface_id,source_system,request_id,scope,payload_hash,code) VALUES(#{r.interfaceId},#{source},#{r.requestId},#{scope},#{hash},'OK')</insert>
+ <insert id="replayReceipt">INSERT INTO target.if_target_receipt(request_id,trace_id,attempt_id,simulation_id,planned_http_status,replayed)
+ VALUES(#{requestId},#{trace},CAST(#{attempt} AS uuid),CAST(#{scenario} AS uuid),200,true)</insert>
+</mapper>

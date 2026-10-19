@@ -23,6 +23,7 @@ class HttpContractTest {
     @Autowired MockMvc http;
     @MockitoBean ReceiptMapper mapper;
     @MockitoBean SimulationService simulations;
+    @MockitoBean BusinessService business;
 
     @Test void missingCorrelationHeadersAreBadRequest() throws Exception {
         http.perform(post("/api/receive").contentType("application/json")

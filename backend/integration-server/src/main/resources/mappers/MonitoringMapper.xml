@@ -4,7 +4,7 @@
  <insert id="event">INSERT INTO integration.if_trace_event(request_key,attempt_id,stage,outcome)
  SELECT id,COALESCE(CAST(#{attempt} AS uuid),CASE WHEN #{stage} IN ('RESPONSE_PROCESSED','REQUEST_COMPLETED') THEN attempt_id END),#{stage},#{outcome} FROM integration.if_request WHERE id=CAST(#{id} AS uuid)</insert>
  <insert id="startAttempt">INSERT INTO integration.if_attempt(id,request_key,attempt_number,status)
- VALUES(CAST(#{attempt} AS uuid),CAST(#{id} AS uuid),1,'SENDING')</insert>
+ SELECT CAST(#{attempt} AS uuid),CAST(#{id} AS uuid),coalesce(max(attempt_number),0)+1,'SENDING' FROM integration.if_attempt WHERE request_key=CAST(#{id} AS uuid)</insert>
  <update id="finishAttempt">UPDATE integration.if_attempt a SET status=r.status,http_status=r.http_status,error_code=r.error_code,
  completed_at=clock_timestamp(),duration_ms=greatest(0,floor(extract(epoch FROM (clock_timestamp()-a.started_at))*1000)::bigint)
  FROM integration.if_request r WHERE r.id=CAST(#{id} AS uuid) AND a.id=r.attempt_id AND a.status='SENDING'</update>

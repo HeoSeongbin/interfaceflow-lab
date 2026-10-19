@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lab.interfaceflow.integration.DeliveryMapper">
+ <select id="advisory" resultType="string">SELECT pg_advisory_xact_lock(hashtextextended(#{key},0))::text</select>
+ <sql id="data">to_jsonb(d)||jsonb_build_object('traceId',r.trace_id,'live',d.lease_until &gt; clock_timestamp(),'due',d.next_at &lt;= clock_timestamp())</sql>
+ <select id="existing" resultType="string">SELECT (<include refid="data"/>)::text FROM integration.if_delivery d JOIN integration.if_request r ON r.id=d.request_key WHERE d.interface_id=#{interfaceId} AND d.source_system=#{source} AND d.request_id=#{requestId} AND d.scope=#{scope}</select>
+ <insert id="insert">INSERT INTO integration.if_delivery(request_key,interface_id,source_system,request_id,scope,payload_hash,replay_cipher,max_attempts,state)
+ VALUES(CAST(#{id} AS uuid),#{interfaceId},#{source},#{requestId},#{scope},#{hash},#{cipher},#{max},#{state})</insert>
+ <select id="row" resultType="string">SELECT (<include refid="data"/>)::text FROM integration.if_delivery d JOIN integration.if_request r ON r.id=d.request_key WHERE d.request_key=CAST(#{id} AS uuid)</select>
+ <select id="lock" resultType="string">SELECT (<include refid="data"/>)::text FROM integration.if_delivery d JOIN integration.if_request r ON r.id=d.request_key WHERE d.request_key=CAST(#{id} AS uuid) FOR UPDATE OF d</select>
+ <select id="due" resultType="string">SELECT request_key::text FROM integration.if_delivery WHERE (state='WAIT' AND next_at &lt;= clock_timestamp()) OR (state='LEASED' AND lease_until &lt;= clock_timestamp()) ORDER BY next_at LIMIT 20</select>
+ <select id="list" resultType="string">SELECT jsonb_build_object('id',d.request_key,'requestId',r.request_id,'traceId',r.trace_id,'interfaceId',r.interface_id,'status',r.status,'state',d.state,'attempts',d.attempts,'maxAttempts',d.max_attempts,'nextAt',d.next_at,'leaseUntil',d.lease_until,'errorCode',d.last_error,'canRetry',d.state IN ('DONE','DEAD_LETTER') AND d.retryable AND d.attempts &lt; 10)::text FROM integration.if_delivery d JOIN integration.if_request r ON r.id=d.request_key ORDER BY r.created_at DESC LIMIT 100</select>
+ <update id="claim">UPDATE integration.if_delivery SET state='LEASED',attempts=attempts+1,lease_token=CAST(#{token} AS uuid),lease_until=clock_timestamp()+interval '60 seconds' WHERE request_key=CAST(#{id} AS uuid)</update>
+ <update id="sending">UPDATE integration.if_request SET status='SENDING',attempt_id=CAST(#{attempt} AS uuid),processing_stage='REQUEST_DISPATCHED',updated_at=now() WHERE id=CAST(#{id} AS uuid) AND status IN ('READY','FAILED','UNKNOWN')</update>
+ <update id="expired">UPDATE integration.if_request SET status='UNKNOWN',error_code='LEASE_EXPIRED',updated_at=now() WHERE id=CAST(#{id} AS uuid) AND status='SENDING'</update>
+ <update id="closeAttempt">UPDATE integration.if_attempt SET status='UNKNOWN',error_code='LEASE_EXPIRED',completed_at=clock_timestamp() WHERE request_key=CAST(#{id} AS uuid) AND status='SENDING'</update>
+ <update id="finish">UPDATE integration.if_delivery SET state=#{state},retryable=#{retryable},last_error=#{error},lease_token=NULL,lease_until=NULL,next_at=clock_timestamp()+#{delay}*interval '1 millisecond' WHERE request_key=CAST(#{id} AS uuid)</update>
+ <update id="manual">UPDATE integration.if_delivery SET state='WAIT',max_attempts=attempts+1,next_at=clock_timestamp(),lease_token=NULL,lease_until=NULL WHERE request_key=CAST(#{id} AS uuid)</update>
+</mapper>

@@ -126,3 +126,17 @@ Target에도 등록/목록/단건 조회 제어 API가 있으며 Integration이 
 | CONNECTION_FAILURE | 서버에 고정된 닫힌 주소로 실제 연결 / UNKNOWN, TARGET_IO_ERROR |
 
 Target 수신은 시나리오별 최대 20회이며 scope/만료/한도 초과 시 수신 기록 없이 409다. TIMEOUT의 수신·예정 응답은 이미 커밋될 수 있고 실제 응답 전달 성공을 뜻하지 않는다. 일반 전송은 같은 Interface/Request ID여도 장애 설정을 상속하지 않는다. 반복 실행의 내부 UUID/Attempt는 별도이며 업무 중복 방지는 Phase 5다. 이력 상세와 Trace의 request에 simulationId를 제공한다. Control API는 전문을 저장하지 않는다.
+
+## Phase 5 신뢰성 계약
+
+`POST /api/requests`는 이제 일반 업무 멱등성 경로다. 키는 `(interfaceId, 정의의 sourceSystem, requestId, normal)`이다. 같은 전문의 최종 결과는 최초 내부 UUID/Trace/최종 Attempt를 반환하며 `X-Trace-Id`도 최초 Trace다. 진행/재시도 대기 중은 409 REQUEST_IN_PROGRESS, 같은 키의 다른 전문은 409 PAYLOAD_CONFLICT다. 객체 키 순서/동등 숫자 표기는 같게 보고 배열 순서와 문자열/숫자 타입은 구분한다. 최초 접수 이후 정의 변경은 기존 요청에 적용하지 않는다.
+
+- `POST /api/simulations/{uuid}/reliable-execute`: 기존 SendRequest. 불변 시나리오 UUID로 namespace를 격리하고 같은 내부 요청에 자동 재시도/멱등성을 적용한다. `/execute`는 기존 수동 장애 실험으로 유지하며 업무 멱등성·자동 재시도를 적용하지 않는다.
+- `GET /api/retries`: 최근 100개 안전한 metadata 배열. id/requestId/traceId/interfaceId/status/state/attempts/maxAttempts/nextAt/leaseUntil/errorCode/canRetry. 암호문·키·원문은 반환하지 않는다. status는 마지막 결과, state는 WAIT/LEASED/DONE/DEAD_LETTER다.
+- `POST /api/requests/{internalUuid}/retry`: 허용 상태에서 202 `{id,state:WAIT}`. 작업자가 후속 실행하며 자동 소진 후 한 번 더 예약한다. 동시에 하나만 예약, 총 10회 한도. 성공/400/409/검증·매핑 오류/진행·대기 중은 409 RETRY_NOT_ALLOWED, 과거 보호 원본 없는 기록은 404, 원본 키 복구 필요는 503.
+- Target `GET /api/capabilities`: `{idempotencyProtocol:interfaceflow-v1}`. Source가 전송 전 확인한다. 미확인은 업무 POST 없이 UNKNOWN/DEAD_LETTER이며 운영 조치 후 수동 재시도한다.
+- Target 업무 전송은 기존 세 식별자에 X-Source-System과 X-Idempotency-Scope를 추가한다. scope는 normal 또는 X-Simulation-Id와 같은 UUID다. 고유키/변환 전문 hash를 검증하고 동일 요청은 저장된 OK 업무 결과를 재사용한다. 다른 전문은 409 PAYLOAD_CONFLICT다.
+
+retryMaxAttempts는 최초 포함 총 자동 Attempt 수(1~5). 500ms 지수 backoff, 최대 30초, 50~100% jitter. 408/429/5xx/통신/응답 계약 오류를 대상으로 하고 400/409/검증·매핑 실패는 재시도하지 않는다. 요청 상태 UNKNOWN을 확정 실패로 바꾸지 않고 큐의 소진 상태와 분리한다. 진단 이벤트의 REQUEST_COMPLETED는 기존 단일 처리 흐름 종료 의미이며 후속 RETRY_SCHEDULED/DEAD_LETTER 및 Retry Center 실행 상태를 함께 확인한다.
+
+REPLAY_KEY는 고정된 base64 32-byte 환경 변수다. 신규 일반/신뢰성 전송은 키 누락 시 503이며 트랜잭션을 롤백한다. 원본은 AES-GCM으로 저장되고 상세/Trace에는 기존 마스킹 snapshot만 제공한다. 암호화 키를 잃으면 원본을 재구성할 수 없다. 재시작은 키와 DB를 유지해야 한다. lease는 60초이며 만료 전에는 다른 작업자가 실행하지 않고, 만료 후 이전 Attempt UNKNOWN + 새 Attempt로 복구한다. 전송 예산/절대 10회 한도를 소진하면 자동 실행하지 않는다. 구체적 불확실성·보관 한계는 ADR-012/013을 따른다.

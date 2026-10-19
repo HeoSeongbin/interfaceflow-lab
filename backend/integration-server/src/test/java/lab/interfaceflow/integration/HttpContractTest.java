@@ -14,6 +14,7 @@ class HttpContractTest {
     @Autowired MockMvc http;
     @MockitoBean TransmissionService service;
     @MockitoBean RequestLifecycle lifecycle;
+    @MockitoBean ReliableDelivery reliable;
 
     @Test void invalidJsonHasStableErrorAndGeneratedTrace() throws Exception {
         http.perform(post("/api/requests").contentType("application/json").content("{"))

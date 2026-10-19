@@ -18,10 +18,12 @@ class DatabaseIntegrationTest {
  @Autowired TestRestTemplate http;
  @Autowired JdbcTemplate jdbc;
  @DynamicPropertySource static void config(DynamicPropertyRegistry r) throws Exception {
+  r.add("lab.retry-worker",()->"false");
   String url=System.getenv("TEST_DB_URL");
   if(url==null){db=new PostgreSQLContainer<>("postgres:17-alpine");db.start();r.add("spring.datasource.url",db::getJdbcUrl);r.add("spring.datasource.username",db::getUsername);r.add("spring.datasource.password",db::getPassword);}
   else {r.add("spring.datasource.url",()->url);r.add("spring.datasource.username",()->"interfaceflow");r.add("spring.datasource.password",()->"local-test");}
   target=com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1",0),0);
+  target.createContext("/api/capabilities",e->{byte[] body=(protection?"{\"idempotencyProtocol\":\"interfaceflow-v1\"}":"{}").getBytes(java.nio.charset.StandardCharsets.UTF_8);e.getResponseHeaders().set("Content-Type","application/json");e.sendResponseHeaders(200,body.length);e.getResponseBody().write(body);e.close();});
   target.createContext("/api/receive",e->{String trace=e.getRequestHeaders().getFirst("X-Trace-Id");String request=e.getRequestHeaders().getFirst("X-Request-Id");byte[] body=("{\"code\":\"OK\",\"requestId\":\""+request+"\",\"traceId\":\""+trace+"\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);lastPayload=new com.fasterxml.jackson.databind.ObjectMapper().readTree(e.getRequestBody()).path("payload");received.incrementAndGet();
    var waiting=block;
    if(waiting!=null){arrived.countDown();try{waiting.await(15,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}}
@@ -32,6 +34,7 @@ class DatabaseIntegrationTest {
  static com.sun.net.httpserver.HttpServer target;
  static final java.util.concurrent.atomic.AtomicInteger received=new java.util.concurrent.atomic.AtomicInteger();
  static volatile com.fasterxml.jackson.databind.JsonNode lastPayload;
+ static volatile boolean protection=true;
  static final java.util.concurrent.atomic.AtomicInteger targetStatus=new java.util.concurrent.atomic.AtomicInteger(200);
  static volatile java.util.concurrent.CountDownLatch block,arrived;
  private final com.fasterxml.jackson.databind.ObjectMapper json=new com.fasterxml.jackson.databind.ObjectMapper();
@@ -151,13 +154,13 @@ class DatabaseIntegrationTest {
   assertEquals(400,http.postForEntity("/api/systems",source.put("role","TARGET"),String.class).getStatusCode().value());
   var definition=create(configuration());assertEquals(409,http.postForEntity("/api/interfaces",definition.deepCopy().put("version",0),String.class).getStatusCode().value());
  }
- @Test void repeatedLogicalIdsRemainDistinctUntilIdempotencyPhase(){
+ @Test void repeatedLogicalIdsReturnOriginalResult(){
   var definition=create(configuration());String id=definition.path("interfaceId").asText(),requestId="REPEAT-"+UUID.randomUUID();
   var first=send(id,payload(),requestId).getBody();var second=send(id,payload(),requestId).getBody();
   assertEquals(requestId,first.path("requestId").asText());assertEquals(requestId,second.path("requestId").asText());
-  assertNotEquals(first.path("attemptId"),second.path("attemptId"));assertNotEquals(first.path("id"),second.path("id"));
+  assertEquals(first.path("attemptId"),second.path("attemptId"));assertEquals(first.path("id"),second.path("id"));
   var history=http.getForObject("/api/requests?query="+requestId+"&size=1",com.fasterxml.jackson.databind.JsonNode.class);
-  assertEquals(2,history.path("total").asLong());assertEquals(1,history.path("items").size());
+  assertEquals(1,history.path("total").asLong());assertEquals(1,history.path("items").size());
  }
  @Test void numericBoundsKeepJsonDecimalPrecision(){
   var draft=configuration();draft.set("mappings",json.createArrayNode());
@@ -204,7 +207,7 @@ class DatabaseIntegrationTest {
   var definition=create(configuration());String trace=UUID.randomUUID().toString().replace("-","");
   var headers=new HttpHeaders();headers.setContentType(MediaType.APPLICATION_JSON);headers.set("X-Trace-Id",trace);
   for(int i=0;i<2;i++){
-   var body=new lab.interfaceflow.common.Contracts.SendRequest(definition.path("interfaceId").asText(),"REPEATED",payload());
+   var body=new lab.interfaceflow.common.Contracts.SendRequest(definition.path("interfaceId").asText(),"REPEATED-"+i,payload());
    assertEquals(200,http.postForEntity("/api/requests",new HttpEntity<>(body,headers),String.class).getStatusCode().value());
   }
   var rows=http.getForObject("/api/traces/"+trace,com.fasterxml.jackson.databind.JsonNode.class);
@@ -252,6 +255,58 @@ class DatabaseIntegrationTest {
   assertEquals("UNKNOWN",result.status());assertEquals("TARGET_IO_ERROR",result.errorCode());assertNull(result.httpStatus());assertNotNull(result.attemptId());assertEquals(before,received.get());
   assertEquals(s.id(),lifecycle.detail(result.id()).path("simulationId").asText());
   org.slf4j.MDC.clear();
+ }
+
+ @Autowired DeliveryStore durable;
+ @Autowired ReliableDelivery reliable;
+ @Test void concurrentDuplicateIsBlockedAndChangedPayloadConflicts() throws Exception {
+  var d=create(configuration());String interfaceId=d.path("interfaceId").asText(),requestId="KEY-"+UUID.randomUUID();int before=received.get();
+  block=new java.util.concurrent.CountDownLatch(1);arrived=new java.util.concurrent.CountDownLatch(1);
+  try(var pool=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()){
+   var first=pool.submit(()->send(interfaceId,payload(),requestId));assertTrue(arrived.await(5,java.util.concurrent.TimeUnit.SECONDS));
+   assertEquals(409,send(interfaceId,payload(),requestId).getStatusCode().value());
+   assertEquals(409,send(interfaceId,payload().put("userId","CHANGED"),requestId).getStatusCode().value());
+   block.countDown();var result=first.get(10,java.util.concurrent.TimeUnit.SECONDS).getBody();
+   var cached=send(interfaceId,payload(),requestId);assertEquals(200,cached.getStatusCode().value());assertEquals(result.path("id"),cached.getBody().path("id"));assertEquals(result.path("traceId"),cached.getBody().path("traceId"));
+   assertEquals(result.path("traceId").asText(),cached.getHeaders().getFirst("X-Trace-Id"));assertEquals(before+1,received.get());
+  }finally{block.countDown();block=null;arrived=null;}
+ }
+ @Test void expiredLeaseIsRecoveredAndOldCompletionIsFenced(){
+  var draft=configuration().put("retryMaxAttempts",3);var d=create(draft);String id=d.path("interfaceId").asText(),trace=UUID.randomUUID().toString().replace("-","");
+  var payload=payload().put("email","protected@example.com");
+  var registration=durable.register(new lab.interfaceflow.common.Contracts.SendRequest(id,"LEASE-"+UUID.randomUUID(),payload),trace,null);
+  var first=registration.claim();assertNotNull(first);assertNull(durable.claim(registration.id()));
+  String encrypted=jdbc.queryForObject("SELECT replay_cipher FROM integration.if_delivery WHERE request_key=CAST(? AS uuid)",String.class,registration.id());assertFalse(encrypted.contains("protected@example.com"));
+  jdbc.update("UPDATE integration.if_delivery SET lease_until=now()-interval '1 second' WHERE request_key=CAST(? AS uuid)",registration.id());
+  var recovered=durable.claim(registration.id());assertNotNull(recovered);assertNotEquals(first.attemptId(),recovered.attemptId());assertEquals(first.traceId(),recovered.traceId());
+  assertFalse(durable.complete(first,"SUCCESS",200,null,null,0));
+  assertTrue(durable.complete(recovered,"SUCCESS",200,null,null,0));
+  assertEquals("UNKNOWN",jdbc.queryForObject("SELECT status FROM integration.if_attempt WHERE id=CAST(? AS uuid)",String.class,first.attemptId()));
+  assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM integration.if_attempt WHERE request_key=CAST(? AS uuid)",Integer.class,registration.id()));
+ }
+ @Test void automaticBudgetAndConcurrentManualRetryAreBounded() throws Exception {
+  var d=create(configuration());String id=d.path("interfaceId").asText();
+  var r=durable.register(new lab.interfaceflow.common.Contracts.SendRequest(id,"MANUAL-"+UUID.randomUUID(),payload()),UUID.randomUUID().toString().replace("-",""),null);
+  var claim=r.claim();assertNotNull(claim);assertTrue(durable.complete(claim,"UNKNOWN",503,"TARGET_HTTP_ERROR",null,1));
+  assertEquals("DEAD_LETTER",jdbc.queryForObject("SELECT state FROM integration.if_delivery WHERE request_key=CAST(? AS uuid)",String.class,r.id()));
+  try(var pool=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()){
+   var tasks=new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();for(int i=0;i<4;i++)tasks.add(pool.submit(()->{try{durable.retry(r.id());return true;}catch(ApiProblem e){return false;}}));
+   int accepted=0;for(var task:tasks)if(task.get())accepted++;assertEquals(1,accepted);
+  }
+  reliable.run(r.id());assertEquals("SUCCESS",durable.result(r.id()).status());assertEquals(2,jdbc.queryForObject("SELECT attempts FROM integration.if_delivery WHERE request_key=CAST(? AS uuid)",Integer.class,r.id()));
+  assertThrows(ApiProblem.class,()->durable.retry(r.id()));
+  assertFalse(http.getForObject("/api/retries",String.class).contains("replay_cipher"));assertFalse(http.getForObject("/api/requests/"+r.id(),String.class).contains("replay_cipher"));
+ }
+
+ @Test void unconfirmedTargetIdempotencyNeverDispatchesBusinessRequest(){
+  var d=create(configuration());int before=received.get();
+  try{
+   protection=false;
+   var result=send(d.path("interfaceId").asText(),payload());
+   assertEquals("UNKNOWN",result.path("status").asText());assertEquals("TARGET_IDEMPOTENCY_UNCONFIRMED",result.path("errorCode").asText());assertEquals(before,received.get());
+   assertEquals("DEAD_LETTER",jdbc.queryForObject("SELECT state FROM integration.if_delivery WHERE request_key=CAST(? AS uuid)",String.class,result.path("id").asText()));
+   protection=true;durable.retry(result.path("id").asText());reliable.run(result.path("id").asText());assertEquals("SUCCESS",durable.result(result.path("id").asText()).status());
+  }finally{protection=true;}
  }
 
 }

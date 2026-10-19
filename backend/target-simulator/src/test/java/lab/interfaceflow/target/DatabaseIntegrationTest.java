@@ -91,4 +91,20 @@ class DatabaseIntegrationTest {
   assertEquals(400,http.postForEntity("/api/simulations",new HttpEntity<>(body,headers),String.class).getStatusCode().value());
  }
 
+ @Test void businessIdempotencySerializesConcurrentDuplicatesAndRejectsConflict() throws Exception {
+  String requestId="BIZ-"+UUID.randomUUID();
+  var body=new lab.interfaceflow.common.Contracts.SendRequest("IF-BIZ",requestId,new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("amount",1));
+  java.util.function.Function<String,HttpHeaders> headers=source->{var h=new HttpHeaders();h.setContentType(MediaType.APPLICATION_JSON);h.set("X-Trace-Id","0123456789abcdef0123456789abcdef");h.set("X-Request-Id",requestId);h.set("X-Attempt-Id",UUID.randomUUID().toString());h.set("X-Idempotency-Scope","normal");h.set("X-Source-System",source);return h;};
+  try(var pool=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()){
+   var tasks=new java.util.ArrayList<java.util.concurrent.Future<Integer>>();for(int i=0;i<6;i++)tasks.add(pool.submit(()->http.postForEntity("/api/receive",new HttpEntity<>(body,headers.apply("SYSTEM_A")),String.class).getStatusCode().value()));
+   for(var task:tasks)assertEquals(200,task.get(10,java.util.concurrent.TimeUnit.SECONDS));
+  }
+  assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM target.if_business_result WHERE request_id=?",Integer.class,requestId));
+  assertEquals(5,jdbc.queryForObject("SELECT count(*) FROM target.if_target_receipt WHERE request_id=? AND replayed",Integer.class,requestId));
+  var changed=new lab.interfaceflow.common.Contracts.SendRequest("IF-BIZ",requestId,new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("amount",2));
+  assertEquals(409,http.postForEntity("/api/receive",new HttpEntity<>(changed,headers.apply("SYSTEM_A")),String.class).getStatusCode().value());
+  assertEquals(200,http.postForEntity("/api/receive",new HttpEntity<>(changed,headers.apply("SYSTEM_OTHER")),String.class).getStatusCode().value());
+  assertEquals(2,jdbc.queryForObject("SELECT count(*) FROM target.if_business_result WHERE request_id=?",Integer.class,requestId));
+ }
+
 }

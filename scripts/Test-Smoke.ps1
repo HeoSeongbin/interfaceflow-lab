@@ -1,5 +1,6 @@
 param([string]$Java='java', [int]$IntegrationPort=18080, [int]$TargetPort=18081, [switch]$BrowserTests)
 $ErrorActionPreference='Stop'
+if (-not $env:REPLAY_KEY) { throw 'Set a stable REPLAY_KEY for the disposable test stack.' }
 if (-not $env:DB_PASSWORD -or -not $env:DB_URL) { throw 'Set DB_PASSWORD and DB_URL for a disposable test database first.' }
 $root=Split-Path $PSScriptRoot -Parent
 $runtime=Join-Path $root '.tools'

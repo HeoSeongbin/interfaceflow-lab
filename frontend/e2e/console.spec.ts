@@ -259,3 +259,39 @@ test('real simulator scenarios preserve counters, isolation and uncertain outcom
  // An ordinary send with identical logical IDs must not inherit any scenario.
  const normal=await page.request.post('/api/requests',{data:{interfaceId:definition.interfaceId,requestId:lastRequestId,payload}});expect((await normal.json()).status).toBe('SUCCESS');
 });
+
+test('reliable retries keep identifiers and commit one Target business result',async({page})=>{
+ const sample=await (await page.request.get('/api/interfaces/IF-USER-001')).json();
+ const definition={...sample,interfaceId:`IF-REL-${crypto.randomUUID()}`,interfaceName:'Reliable test',version:0,timeoutMs:300,retryMaxAttempts:3};
+ expect((await page.request.post('/api/interfaces',{data:definition})).status()).toBe(201);
+ for(const type of ['FAIL_THEN_SUCCESS','TIMEOUT','INVALID_RESPONSE']){
+  const requestId=`REL-${crypto.randomUUID()}`;
+  const scenario=await (await page.request.post('/api/simulations',{data:{type,interfaceId:definition.interfaceId,requestId,delayMs:type==='TIMEOUT'?900:0,failureCount:type==='FAIL_THEN_SUCCESS'?1:0,expiresAt:new Date(Date.now()+600000).toISOString()}})).json();
+  const body={interfaceId:definition.interfaceId,requestId,payload:{userId:'REL001',userName:'Retry demo',email:'protected@example.com'}};
+  const firstResponse=await page.request.post(`/api/simulations/${scenario.id}/reliable-execute`,{data:body});expect(firstResponse.status(),await firstResponse.text()).toBe(200);const first=await firstResponse.json();
+  expect(first.status,type).toBe('UNKNOWN');
+  await expect.poll(async()=> (await (await page.request.get(`/api/requests/${first.id}`)).json()).status,{timeout:15000}).toBe('SUCCESS');
+  const replay=await (await page.request.post(`/api/simulations/${scenario.id}/reliable-execute`,{data:body})).json();
+  expect(replay.id).toBe(first.id);expect(replay.traceId).toBe(first.traceId);expect(replay.attemptId).not.toBe(first.attemptId);
+  const trace=await (await page.request.get(`/api/traces/${first.traceId}`)).json();expect(trace[0].attempts).toHaveLength(2);expect(trace[0].attempts[0].id).not.toBe(trace[0].attempts[1].id);
+  const url=new URL(process.env.E2E_DB_URL!);url.username=process.env.DB_USER||'interfaceflow';if(process.env.DB_PASSWORD)url.password=process.env.DB_PASSWORD;
+  const db=new pg.Client({connectionString:url.toString()});try{await db.connect();expect(Number((await db.query('SELECT count(*) FROM target.if_business_result WHERE scope=$1',[scenario.id])).rows[0].count)).toBe(1);const stored=(await db.query('SELECT replay_cipher FROM integration.if_delivery WHERE request_key=$1',[first.id])).rows[0].replay_cipher;expect(stored).not.toContain('protected@example.com');}finally{await db.end();}
+  expect(JSON.stringify(trace)).not.toContain('protected@example.com');
+ }
+});
+
+test('retry center manually queues one additional attempt after automatic budget',async({page},testInfo)=>{
+ const sample=await (await page.request.get('/api/interfaces/IF-USER-001')).json();
+ const definition={...sample,interfaceId:`IF-MAN-${crypto.randomUUID()}`,interfaceName:'Manual retry',version:0,retryMaxAttempts:1};
+ expect((await page.request.post('/api/interfaces',{data:definition})).status()).toBe(201);
+ const requestId=`MAN-${crypto.randomUUID()}`;
+ const scenario=await (await page.request.post('/api/simulations',{data:{type:'FAIL_THEN_SUCCESS',interfaceId:definition.interfaceId,requestId,delayMs:0,failureCount:1,expiresAt:new Date(Date.now()+600000).toISOString()}})).json();
+ const first=await (await page.request.post(`/api/simulations/${scenario.id}/reliable-execute`,{data:{interfaceId:definition.interfaceId,requestId,payload:{userId:'M001',userName:'Manual retry demo'}}})).json();expect(first.status).toBe('UNKNOWN');
+ await page.getByRole('button',{name:'Retry Center',exact:true}).filter({visible:true}).click();
+ const row=page.getByRole('row').filter({hasText:requestId});await expect(row).toContainText('DEAD_LETTER');
+ await row.getByRole('button',{name:'한 번 더 예약'}).click();
+ await expect.poll(async()=> (await (await page.request.get(`/api/requests/${first.id}`)).json()).status,{timeout:15000}).toBe('SUCCESS');
+ await page.getByRole('button',{name:'재처리 목록 새로고침'}).click();await expect(row).toContainText('SUCCESS');await expect(row).toContainText('2 / 2');await expect(row.getByRole('button',{name:'한 번 더 예약'})).toBeDisabled();
+ await expect(row).toContainText(first.traceId);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:testInfo.outputPath('retry-center.png'),fullPage:true});
+});

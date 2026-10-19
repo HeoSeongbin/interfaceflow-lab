@@ -10,9 +10,12 @@ import org.slf4j.MDC;
 public class ApiController {
     private final TransmissionService service;
     private final RequestLifecycle lifecycle;
-    public ApiController(TransmissionService service,RequestLifecycle lifecycle){this.service=service;this.lifecycle=lifecycle;}
+    private final ReliableDelivery reliable;
+    public ApiController(TransmissionService service,RequestLifecycle lifecycle,ReliableDelivery reliable){this.service=service;this.lifecycle=lifecycle;this.reliable=reliable;}
     @PostMapping("/api/requests")
-    public SendResult send(@Valid @RequestBody SendRequest request){return service.send(request,MDC.get("traceId"));}
+    public SendResult send(@Valid @RequestBody SendRequest request,jakarta.servlet.http.HttpServletResponse response){
+        var result=reliable.send(request,MDC.get("traceId"),null);MDC.put("traceId",result.traceId());MDC.put("requestId",result.requestId());response.setHeader("X-Trace-Id",result.traceId());return result;
+    }
     public record PreviewInput(JsonNode payload) {}
     @PostMapping("/api/interfaces/{id}/preview")
     public TransmissionService.Preview preview(@PathVariable String id,@RequestBody PreviewInput request){return service.preview(id,request.payload());}

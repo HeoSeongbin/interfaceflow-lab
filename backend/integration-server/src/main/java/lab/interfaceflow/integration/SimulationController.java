@@ -15,8 +15,9 @@ import java.net.http.HttpClient;
 @RestController
 public class SimulationController {
  private final RestClient target;private final TransmissionService transmission;private final InterfaceService interfaces;
- public SimulationController(TransmissionService transmission,InterfaceService interfaces,@Value("${lab.target-url}") String targetUrl){
-  this.transmission=transmission;this.interfaces=interfaces;
+ private final ReliableDelivery reliable;
+ public SimulationController(TransmissionService transmission,InterfaceService interfaces,ReliableDelivery reliable,@Value("${lab.target-url}") String targetUrl){
+  this.transmission=transmission;this.interfaces=interfaces;this.reliable=reliable;
   var factory=new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build());factory.setReadTimeout(Duration.ofSeconds(3));
   target=RestClient.builder().baseUrl(targetUrl).requestFactory(factory).build();
  }
@@ -37,5 +38,12 @@ public class SimulationController {
   var scenario=call(()->target.get().uri("/api/simulations/{id}",id).header("X-Trace-Id",MDC.get("traceId")).retrieve().body(Scenario.class));
   if(scenario==null)throw new ApiProblem(502,"INVALID_SIMULATION_RESPONSE","시나리오 조회 응답이 없습니다.");
   return transmission.send(request,MDC.get("traceId"),scenario);
+ }
+ @PostMapping("/api/simulations/{id}/reliable-execute")
+ public SendResult reliable(@PathVariable String id,@Valid @RequestBody SendRequest request,jakarta.servlet.http.HttpServletResponse response){
+  if(!Simulations.validId(id))throw new ApiProblem(400,"INVALID_SIMULATION_ID","시나리오 UUID를 확인하세요.");
+  var scenario=call(()->target.get().uri("/api/simulations/{id}",id).header("X-Trace-Id",MDC.get("traceId")).retrieve().body(Scenario.class));
+  if(scenario==null)throw new ApiProblem(502,"INVALID_SIMULATION_RESPONSE","시나리오 응답이 없습니다.");
+  var result=reliable.send(request,MDC.get("traceId"),scenario);MDC.put("traceId",result.traceId());MDC.put("requestId",result.requestId());response.setHeader("X-Trace-Id",result.traceId());return result;
  }
 }
