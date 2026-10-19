@@ -216,3 +216,46 @@ test('trace explorer and dashboard show actual persisted processing', async ({ p
   await expect(page.getByRole('cell',{name:'SUCCESS',exact:true}).first()).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
+
+test('simulation lab creates an isolated scenario and shows a real HTTP error', async ({page},testInfo)=>{
+ await page.getByRole('button',{name:'Simulation Lab',exact:true}).filter({visible:true}).click();
+ await page.getByLabel('장애 유형').selectOption('HTTP_500');
+ await page.getByRole('button',{name:'시나리오 등록',exact:true}).click();
+ await expect(page.getByRole('button',{name:'시나리오 실행',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'시나리오 실행',exact:true}).click();
+ await expect(page.getByRole('cell',{name:'UNKNOWN',exact:false})).toBeVisible();
+ await expect(page.getByRole('cell',{name:'UNKNOWN',exact:false})).toContainText('500');
+ await page.getByRole('button',{name:'시나리오 목록 조회'}).click();
+ await expect(page.locator('pre')).toContainText('HTTP_500');
+ await page.screenshot({path:testInfo.outputPath('simulation.png'),fullPage:true});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('real simulator scenarios preserve counters, isolation and uncertain outcomes',async({page})=>{
+ const base=(await (await page.request.get('/api/interfaces/IF-USER-001')).json());
+ const definition={...base,interfaceId:`IF-SIM-${crypto.randomUUID()}`,interfaceName:'E2E Simulation',version:0,timeoutMs:300};
+ expect((await page.request.post('/api/interfaces',{data:definition})).status()).toBe(201);
+ const payload={userId:'SIM001',userName:'가상 테스트'};let lastRequestId='';
+ for(const type of ['SUCCESS','HTTP_400','HTTP_500','DELAY','TIMEOUT','INVALID_RESPONSE','FAIL_THEN_SUCCESS','DUPLICATE','CONNECTION_FAILURE']){
+  const requestId=`SIM-${crypto.randomUUID()}`;lastRequestId=requestId;
+  const created=await page.request.post('/api/simulations',{data:{type,interfaceId:definition.interfaceId,requestId,delayMs:type==='DELAY'?50:type==='TIMEOUT'?900:0,failureCount:type==='FAIL_THEN_SUCCESS'?1:0,expiresAt:new Date(Date.now()+600000).toISOString()}});
+  expect(created.status(),await created.text()).toBe(201);const scenario=await created.json();
+  const execute=async()=>{const r=await page.request.post(`/api/simulations/${scenario.id}/execute`,{data:{interfaceId:definition.interfaceId,requestId,payload}});expect(r.status(),await r.text()).toBe(200);return r.json();};
+  const first=await execute();
+  const expected=['SUCCESS','DELAY','DUPLICATE'].includes(type)?'SUCCESS':type==='HTTP_400'?'FAILED':'UNKNOWN';
+  expect(first.status,type).toBe(expected);expect(first.attemptId).toMatch(/^[a-f0-9-]{36}$/);
+  if(type==='TIMEOUT'||type==='CONNECTION_FAILURE'){expect(first.httpStatus).toBeNull();expect(first.errorCode).toBe('TARGET_IO_ERROR');}
+  if(type==='INVALID_RESPONSE')expect(first.errorCode).toBe('INVALID_RESPONSE');
+  if(type==='FAIL_THEN_SUCCESS'||type==='DUPLICATE'){
+   const second=await execute();expect(second.status).toBe(type==='FAIL_THEN_SUCCESS'?'SUCCESS':'FAILED');expect(second.attemptId).not.toBe(first.attemptId);expect(second.id).not.toBe(first.id);expect(second.requestId).toBe(first.requestId);
+   if(type==='DUPLICATE')expect(second.response.code).toBe('SIMULATED_DUPLICATE');
+  }
+  const mismatch=await page.request.post(`/api/simulations/${scenario.id}/execute`,{data:{interfaceId:definition.interfaceId,requestId:'WRONG',payload}});expect(mismatch.status()).toBe(409);
+  const trace=await (await page.request.get(`/api/traces/${first.traceId}`)).json();expect(trace[0].request.simulationId).toBe(scenario.id);
+  if(!process.env.E2E_DB_URL)throw new Error('E2E_DB_URL required');
+  const url=new URL(process.env.E2E_DB_URL);url.username=process.env.DB_USER||'interfaceflow';if(process.env.DB_PASSWORD)url.password=process.env.DB_PASSWORD;
+  const db=new pg.Client({connectionString:url.toString()});try{await db.connect();const receipt=await db.query('SELECT request_id,attempt_id,simulation_id FROM target.if_target_receipt WHERE attempt_id=$1',[first.attemptId]);if(type==='CONNECTION_FAILURE')expect(receipt.rowCount).toBe(0);else{expect(receipt.rowCount).toBe(1);expect(receipt.rows[0].simulation_id).toBe(scenario.id);}}finally{await db.end();}
+ }
+ // An ordinary send with identical logical IDs must not inherit any scenario.
+ const normal=await page.request.post('/api/requests',{data:{interfaceId:definition.interfaceId,requestId:lastRequestId,payload}});expect((await normal.json()).status).toBe('SUCCESS');
+});

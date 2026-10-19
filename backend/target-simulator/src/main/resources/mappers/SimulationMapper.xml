@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lab.interfaceflow.target.SimulationMapper">
+ <insert id="insert">INSERT INTO target.if_simulation(id,type,interface_id,request_id,delay_ms,failure_count,expires_at)
+ VALUES(CAST(#{id} AS uuid),#{input.type},#{input.interfaceId},#{input.requestId},#{input.delayMs},#{input.failureCount},#{input.expiresAt})</insert>
+ <sql id="projection">jsonb_build_object('id',id,'type',type,'interfaceId',interface_id,'requestId',request_id,'delayMs',delay_ms,
+ 'failureCount',failure_count,'expiresAt',expires_at,'uses',uses)::text</sql>
+ <select id="find" resultType="string">SELECT <include refid="projection"/> FROM target.if_simulation WHERE id=CAST(#{id} AS uuid)</select>
+ <select id="list" resultType="string">SELECT <include refid="projection"/> FROM target.if_simulation ORDER BY created_at DESC,id DESC LIMIT 100</select>
+ <select id="consume" resultType="integer" affectData="true" flushCache="true">
+ UPDATE target.if_simulation SET uses=uses+1 WHERE id=CAST(#{id} AS uuid) AND interface_id=#{interfaceId} AND request_id=#{requestId}
+ AND expires_at &gt; clock_timestamp() AND uses &lt; 20 RETURNING uses
+ </select>
+ <insert id="receipt">INSERT INTO target.if_target_receipt(request_id,trace_id,attempt_id,simulation_id,simulation_sequence,planned_http_status)
+ VALUES(#{requestId},#{traceId},CAST(#{attemptId} AS uuid),CAST(#{id} AS uuid),#{sequence},#{httpStatus})</insert>
+</mapper>

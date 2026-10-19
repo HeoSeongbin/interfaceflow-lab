@@ -10,7 +10,7 @@
  FROM integration.if_request r WHERE r.id=CAST(#{id} AS uuid) AND a.id=r.attempt_id AND a.status='SENDING'</update>
  <select id="trace" resultType="string">
  SELECT jsonb_build_object('request',jsonb_build_object('id',r.id,'requestId',r.request_id,'interfaceId',r.interface_id,
- 'traceId',r.trace_id,'status',r.status,'durationMs',r.duration_ms,'originalPayload',r.original_payload,'mappedPayload',r.mapped_payload,
+ 'traceId',r.trace_id,'status',r.status,'simulationId',r.simulation_id,'durationMs',r.duration_ms,'originalPayload',r.original_payload,'mappedPayload',r.mapped_payload,
  'response',r.response_payload,'errors',r.validation_errors,'processingStage',r.processing_stage),
  'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM integration.if_trace_event e WHERE e.request_key=r.id),'[]'::jsonb),
  'attempts',COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.attempt_number) FROM integration.if_attempt a WHERE a.request_key=r.id),'[]'::jsonb))::text

@@ -10,6 +10,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 public class ApiErrors extends ResponseEntityExceptionHandler {
+    @ExceptionHandler(SimulationService.Problem.class)
+    public ResponseEntity<Object> simulation(SimulationService.Problem problem){return ResponseEntity.status(problem.status).body(error(problem.code));}
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(Exception exception, Object body,
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {

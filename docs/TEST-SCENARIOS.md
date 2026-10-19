@@ -45,3 +45,12 @@ PROJECT.md 18절의 12개 시나리오를 순서대로 자동화한다. 특히 t
 - 실제 Chrome desktop/mobile Trace 검색·시도 표시·대시보드 DB 통계와 화면 가로 넘침 검사.
 
 실제 실행 여부와 결과는 PROGRESS에 기록한다.
+
+## Phase 4 검증 항목
+
+- 단위: 실패 예산/중복 순번 결과, 만료/관련 옵션의 제한, 비활성 서비스의 DB 미접근.
+- 실제 PostgreSQL: Target V2/Integration V4 migration, scope/만료/20회 수신 한도 거절 후 counter/receipt 미변경, 병렬 6회에서 지정 2회만 500과 고유 순번, 시나리오 간 counter 격리, 실제 연결 실패 UNKNOWN 기록, 잘못된 TIMEOUT 접수 롤백.
+- 실제 두 JVM/Chrome: 9가지 시나리오의 HTTP/결과/식별자/Trace 연결, FAIL_THEN_SUCCESS와 DUPLICATE 반복 실행, Target receipt 확인, Timeout은 receipt 존재·연결 실패는 미존재, 동일 논리 ID 일반 전송 성공, scope 불일치 409. Simulation Lab 등록/실행/목록/결과와 desktop/mobile 가로 넘침 검사.
+- 기존 매핑·버전·동시 수정·마스킹·Trace·대시보드 및 HTTP 오류·입력 제한 회귀 유지.
+
+실행 결과와 미검증 환경은 PROGRESS에 기록한다.

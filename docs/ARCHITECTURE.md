@@ -94,3 +94,11 @@ WHERE created_at < now() - interval '30 days'
 ## Phase 3 추적 저장
 
 V3는 요청 소유의 IF_TRACE_EVENT와 IF_ATTEMPT를 추가한다. FK는 요청 삭제 시 함께 정리되며 Attempt 이벤트 참조도 보존한다. 요청 상태 변경과 이벤트/Attempt 기록은 같은 짧은 DB 트랜잭션에서 커밋되고 HTTP는 밖에서 실행한다. Trace endpoint는 단일 SQL snapshot으로 요청·이벤트·시도를 조회한다. 과거 데이터는 역산하지 않는다. 통계의 시간·분류·한계는 ADR-010/API 계약을 따른다. 기록에는 진단 마스킹 snapshot만 사용하며 이벤트에 원문이나 임의 메시지를 추가하지 않는다.
+
+## Phase 4 시나리오 소유권과 통신
+
+Target V2는 IF_SIMULATION과 수신 기록의 simulation_id/sequence/planned_http_status를 추가한다. 설정은 불변이고 제어 API는 최근 100개만 조회한다. Target은 atomic UPDATE RETURNING으로 scope·만료·수신 한도를 확인하고 counter와 receipt를 같은 트랜잭션에서 저장한다. 고정된 유형·지연·실패 예산으로 응답을 만들며 DB 커밋 뒤에 sleep한다. planned_http_status는 예정 결과이고 HTTP 전달 보장이 아니다.
+
+Integration V4는 request.simulation_id를 보관한다. 양쪽 서비스는 HTTP로 시나리오를 공유하며 Target schema를 Integration에서 직접 읽지 않는다. 등록/목록/실행 준비용 RestClient는 연결·응답 제한 3초이고, 전문 전송은 기존 인터페이스 timeout을 유지한다. execute 시 접수 트랜잭션 안에서 실제 설정 버전과 TIMEOUT 지연을 검사한다. 일반 send 경로에는 시나리오 헤더를 추가하지 않는다.
+
+CONNECTION_FAILURE 전송은 운영자가 지정한 닫힌 주소로만 라우팅하고 Target 제어 경로는 정상이어야 한다. 수신 횟수 제한은 Target 도달에 적용되므로 이 경로에는 counter/receipt가 없다. 인증·큐·동시 실행의 전체 용량 제어·retry/멱등성은 구현하지 않았다. 상태 정책과 상세 한계는 ADR-011을 따른다.

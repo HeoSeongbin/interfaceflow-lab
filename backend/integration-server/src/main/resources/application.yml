@@ -29,3 +29,4 @@ logging:
 lab:
   target-url: ${TARGET_URL:http://localhost:8081}
   timeout-ms: ${TARGET_TIMEOUT_MS:3000}
+  connection-failure-url: ${CONNECTION_FAILURE_URL:http://127.0.0.1:1}

@@ -8,6 +8,7 @@ import java.util.List;
 
 @Mapper
 public interface RequestMapper {
+    int simulation(@Param("id") String id,@Param("simulationId") String simulationId);
     void insert(@Param("id") String id,@Param("request") SendRequest request,@Param("traceId") String traceId,
         @Param("definition") Definition definition,@Param("original") String original);
     int prepared(@Param("id") String id,@Param("mapped") String mapped,@Param("status") String status,

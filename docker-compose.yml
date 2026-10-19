@@ -21,6 +21,7 @@ services:
       DB_URL: jdbc:postgresql://db:5432/interfaceflow
       DB_USER: interfaceflow
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      SIMULATIONS_ENABLED: ${SIMULATIONS_ENABLED:-true}
     ports: ["127.0.0.1:8081:8081"]
     depends_on:
       db: { condition: service_healthy }
@@ -32,6 +33,7 @@ services:
     environment:
       <<: *db-env
       TARGET_URL: http://target:8081
+      CONNECTION_FAILURE_URL: ${CONNECTION_FAILURE_URL:-http://127.0.0.1:1}
     ports: ["127.0.0.1:8080:8080"]
     depends_on:
       db: { condition: service_healthy }

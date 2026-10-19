@@ -233,4 +233,25 @@ class DatabaseIntegrationTest {
    }
   } finally {targetStatus.set(200);}
  }
+ @Autowired TransmissionService transmission;
+ @Test void simulationScopeAndTimeoutValidationRollBackAcceptance(){
+  var d=create(configuration());String interfaceId=d.path("interfaceId").asText();String requestId="SIM-"+UUID.randomUUID();
+  var s=new lab.interfaceflow.common.Simulations.Scenario(UUID.randomUUID().toString(),lab.interfaceflow.common.Simulations.Type.TIMEOUT,interfaceId,requestId,1,0,java.time.Instant.now().plusSeconds(60),0);
+  var request=new lab.interfaceflow.common.Contracts.SendRequest(interfaceId,requestId,payload());
+  String trace=UUID.randomUUID().toString().replace("-","");
+  assertThrows(ApiProblem.class,()->lifecycle.acceptSimulation(request,trace,s));
+  assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM integration.if_request WHERE request_id=?",Integer.class,requestId));
+  var wrong=new lab.interfaceflow.common.Contracts.SendRequest(interfaceId,"OTHER",payload());
+  assertThrows(ApiProblem.class,()->lifecycle.acceptSimulation(wrong,trace,s));
+ }
+ @Test void connectionSimulationMakesRealIoFailureAndRecordsUnknown(){
+  var d=create(configuration());String interfaceId=d.path("interfaceId").asText();String requestId="SIM-"+UUID.randomUUID();
+  var s=new lab.interfaceflow.common.Simulations.Scenario(UUID.randomUUID().toString(),lab.interfaceflow.common.Simulations.Type.CONNECTION_FAILURE,interfaceId,requestId,0,0,java.time.Instant.now().plusSeconds(60),0);
+  int before=received.get();
+  var result=transmission.send(new lab.interfaceflow.common.Contracts.SendRequest(interfaceId,requestId,payload()),UUID.randomUUID().toString().replace("-",""),s);
+  assertEquals("UNKNOWN",result.status());assertEquals("TARGET_IO_ERROR",result.errorCode());assertNull(result.httpStatus());assertNotNull(result.attemptId());assertEquals(before,received.get());
+  assertEquals(s.id(),lifecycle.detail(result.id()).path("simulationId").asText());
+  org.slf4j.MDC.clear();
+ }
+
 }

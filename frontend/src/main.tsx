@@ -6,11 +6,12 @@ import { api, message, pretty, type Definition, type SystemInfo } from './api';
 import { InterfaceManagement } from './InterfaceManagement';
 import { History } from './History';
 import './style.css';
+import { SimulationLab } from './SimulationLab';
 import { Dashboard, TraceExplorer } from './Monitoring';
 
 const sample=pretty({userId:'USER001',userName:'홍길동',departmentCode:'DEV01',email:'demo@example.com'});
-type Tab='sender'|'interfaces'|'history'|'trace'|'dashboard';
-const tabs: {id:Tab;label:string}[]=[{id:'dashboard',label:'대시보드'},{id:'trace',label:'Trace Explorer'},{id:'sender',label:'전문 전송'},{id:'interfaces',label:'인터페이스 관리'},{id:'history',label:'전송 이력'}];
+type Tab='sender'|'interfaces'|'history'|'trace'|'dashboard'|'simulation';
+const tabs: {id:Tab;label:string}[]=[{id:'simulation',label:'Simulation Lab'},{id:'dashboard',label:'대시보드'},{id:'trace',label:'Trace Explorer'},{id:'sender',label:'전문 전송'},{id:'interfaces',label:'인터페이스 관리'},{id:'history',label:'전송 이력'}];
 
 function Sender({interfaces}:{interfaces:Definition[]}) {
   const [interfaceId,setInterfaceId]=useState('IF-USER-001');
@@ -58,12 +59,12 @@ function App() {
   useEffect(()=>{void refresh().catch(()=>{});},[]);
   function navigate(next:Tab){setTab(next);if(next==='sender')void refresh().catch(()=>{});}
   const navigation=tabs.map(t=><button key={t.id} aria-current={tab===t.id?'page':undefined} className={tab===t.id?'selected':''} onClick={()=>navigate(t.id)}>{t.label}</button>);
-  return <div className={dark?'app dark':'app'}><aside><div className="brand">⇄ InterfaceFlow<span>LAB / DEVELOPMENT</span></div><nav>{navigation}<p>Phase 3 · 추적 및 모니터링</p></nav><small>LOCAL ENVIRONMENT<br/>가상 데이터 전용</small></aside><main>
+  return <div className={dark?'app dark':'app'}><aside><div className="brand">⇄ InterfaceFlow<span>LAB / DEVELOPMENT</span></div><nav>{navigation}<p>Phase 4 · 장애 시뮬레이션</p></nav><small>LOCAL ENVIRONMENT<br/>가상 데이터 전용</small></aside><main>
     <header><span>워크스페이스 / {tabs.find(t=>t.id===tab)?.label}</span><button onClick={()=>setDark(!dark)}>{dark?'라이트 모드':'다크 모드'}</button></header>
     <nav className="mobile-nav">{navigation}</nav>
     {error&&<p className="error" role="alert">설정 조회 실패: {error} <button onClick={()=>void refresh().catch(()=>{})}>다시 조회</button></p>}
-    {tab==='sender'?<Sender interfaces={interfaces}/>:tab==='interfaces'?<InterfaceManagement interfaces={interfaces} systems={systems} refresh={refresh}/>:tab==='trace'?<TraceExplorer/>:tab==='dashboard'?<Dashboard/>:<History/>}
-    <footer>Phase 3: 단계별 Trace·HTTP 시도·DB 현황 집계. 민감 필드는 마스킹됩니다. 장애 시뮬레이션·멱등성·재시도는 후속 단계입니다.</footer>
+    {tab==='simulation'?<SimulationLab interfaces={interfaces}/>:tab==='sender'?<Sender interfaces={interfaces}/>:tab==='interfaces'?<InterfaceManagement interfaces={interfaces} systems={systems} refresh={refresh}/>:tab==='trace'?<TraceExplorer/>:tab==='dashboard'?<Dashboard/>:<History/>}
+    <footer>Phase 4: 요청별 실제 HTTP 장애 시뮬레이션. 민감 필드는 마스킹됩니다. 멱등성·재시도는 후속 단계입니다.</footer>
   </main></div>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

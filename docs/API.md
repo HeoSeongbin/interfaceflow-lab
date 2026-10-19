@@ -103,3 +103,26 @@ GET /actuator/health는 DB 상태를 포함한다. Trace 타임라인·Attempt �
 - `GET /api/requests`: 선택 `from`/`to` ISO Instant 기간 필터 추가. 기존 검색·상태·페이지 계약 유지. 한쪽 경계만 지정할 수 있고 양쪽이 있으면 from < to여야 한다.
 
 이벤트는 REQUEST_RECEIVED, INTERFACE_RESOLVED, SOURCE_VALIDATION, FIELD_MAPPING, TARGET_VALIDATION, REQUEST_DISPATCHED, RESPONSE_PROCESSED, REQUEST_COMPLETED 순서다. 실패 이후 단계는 없다. validation/mapping 실패에는 Attempt가 없다. 단계 시각은 기록 시각이며 단계별 실행시간을 측정한 값이 아니다. HTTP Attempt는 시작/완료, 상태, HTTP 상태, 오류 코드, 소요시간을 제공한다. 자동/수동 재시도는 제공하지 않는다.
+
+## Phase 4 장애 시뮬레이션
+
+Integration:
+- `GET /api/simulations`: Target에 저장된 최근 100개 시나리오. Target 불가 시 502.
+- `POST /api/simulations`: 201. `{type,interfaceId,requestId,delayMs,failureCount,expiresAt}`. 타입은 SUCCESS/HTTP_400/HTTP_500/DELAY/TIMEOUT/INVALID_RESPONSE/FAIL_THEN_SUCCESS/DUPLICATE/CONNECTION_FAILURE. ID는 기존 Request/Interface 규칙, expiresAt은 미래 ISO Instant(최대 1시간), delayMs 0~15000, failureCount 0~5. DELAY/TIMEOUT만 양수 delayMs, FAIL_THEN_SUCCESS만 1~5 failureCount. 다른 옵션은 0. 존재하는 인터페이스를 지정한다.
+- `POST /api/simulations/{uuid}/execute`: 기존 SendRequest JSON. Interface ID/Request ID는 등록된 값과 동일해야 한다. 정상적인 요청 처리 응답은 HTTP 200의 기존 SendResult이며 대상 HTTP 상태와 처리 상태를 필드로 구분한다. 잘못된 UUID 400, 시나리오 미존재 404, 범위/만료 오류 409, 잘못된 TIMEOUT 옵션 400, 제어 API 접근 불가 502. 제어 단계 실패에는 전송 요청을 접수하지 않는다.
+
+Target에도 등록/목록/단건 조회 제어 API가 있으며 Integration이 HTTP로 호출한다. 대상 전송은 기존 `/api/receive`와 세 식별자 헤더를 유지하고 `X-Simulation-Id`를 선택적으로 추가한다. Target은 자신의 DB 설정만 사용한다. 접수된 실행은 실제 한 번의 HTTP 시도를 수행하며 자동 재시도하지 않는다. UI의 새 실험은 기존 시나리오를 삭제하지 않고 새 UUID를 만든다.
+
+| 유형 | Target 응답 / Integration 결과 |
+|---|---|
+| SUCCESS | 200 OK / SUCCESS |
+| HTTP_400 | 실제 400 / FAILED |
+| HTTP_500 | 실제 500 / UNKNOWN |
+| DELAY | 지정 시간 후 200 / 제한 내면 SUCCESS, Timeout이면 UNKNOWN |
+| TIMEOUT | interface timeout보다 긴 지연 후 응답 / UNKNOWN |
+| INVALID_RESPONSE | 200이지만 OK/식별자 계약 누락 / UNKNOWN, INVALID_RESPONSE |
+| FAIL_THEN_SUCCESS | 같은 시나리오의 첫 N회 500, 이후 200 / UNKNOWN 후 SUCCESS |
+| DUPLICATE | 첫 수신 200, 두 번째부터 409 SIMULATED_DUPLICATE / SUCCESS 후 FAILED |
+| CONNECTION_FAILURE | 서버에 고정된 닫힌 주소로 실제 연결 / UNKNOWN, TARGET_IO_ERROR |
+
+Target 수신은 시나리오별 최대 20회이며 scope/만료/한도 초과 시 수신 기록 없이 409다. TIMEOUT의 수신·예정 응답은 이미 커밋될 수 있고 실제 응답 전달 성공을 뜻하지 않는다. 일반 전송은 같은 Interface/Request ID여도 장애 설정을 상속하지 않는다. 반복 실행의 내부 UUID/Attempt는 별도이며 업무 중복 방지는 Phase 5다. 이력 상세와 Trace의 request에 simulationId를 제공한다. Control API는 전문을 저장하지 않는다.

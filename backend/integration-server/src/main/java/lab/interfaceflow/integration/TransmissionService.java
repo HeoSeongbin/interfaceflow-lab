@@ -21,6 +21,8 @@ public class TransmissionService {
     private final ObjectMapper json;
     private final String targetUrl;
     private final HttpClient httpClient;
+    @Value("${lab.connection-failure-url:http://127.0.0.1:1}")
+    private String connectionFailureUrl="http://127.0.0.1:1";
 
     public TransmissionService(RequestLifecycle lifecycle,InterfaceService interfaces,PayloadEngine engine,
             PayloadRedactor redactor,ObjectMapper json,@Value("${lab.target-url}") String targetUrl,
@@ -36,9 +38,12 @@ public class TransmissionService {
     }
     // The lifecycle bean commits registration before any validation/HTTP work starts.
     public SendResult send(SendRequest request,String traceId) {
+        return send(request,traceId,null);
+    }
+    public SendResult send(SendRequest request,String traceId,lab.interfaceflow.common.Simulations.Scenario scenario) {
         long start=System.nanoTime();
         org.slf4j.MDC.put("requestId",request.requestId());
-        var accepted=lifecycle.accept(request,traceId);
+        var accepted=scenario==null?lifecycle.accept(request,traceId):lifecycle.acceptSimulation(request,traceId,scenario);
         var definition=accepted.definition();String id=accepted.id();
         var prepared=engine.prepare(request.payload(),definition);
         lifecycle.prepared(id,prepared,definition,elapsed(start));
@@ -50,10 +55,12 @@ public class TransmissionService {
         String status="UNKNOWN",error=null;Integer httpStatus=null;JsonNode response=null;
         var factory=new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(Duration.ofMillis(definition.timeoutMs()));
-        var client=RestClient.builder().baseUrl(targetUrl).requestFactory(factory).build();
+        boolean connectionFailure=scenario!=null && scenario.type()==lab.interfaceflow.common.Simulations.Type.CONNECTION_FAILURE;
+        var client=RestClient.builder().baseUrl(connectionFailure?connectionFailureUrl:targetUrl).requestFactory(factory).build();
         try {
             var entity=client.post().uri(definition.path()).header("X-Trace-Id",traceId)
                 .header("X-Request-Id",request.requestId()).header("X-Attempt-Id",attemptId)
+                .headers(headers->{if(scenario!=null)headers.set("X-Simulation-Id",scenario.id());})
                 .body(new SendRequest(request.interfaceId(),request.requestId(),prepared.mapped())).retrieve().toEntity(String.class);
             httpStatus=entity.getStatusCode().value();response=parseResponse(entity.getBody());
             if(httpStatus>=200 && httpStatus<300 && response!=null && response.isObject() && "OK".equals(response.path("code").asText())

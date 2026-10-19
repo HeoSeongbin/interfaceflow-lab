@@ -75,3 +75,15 @@ Source Validation → Mapping → Target Validation을 분리한다. 실패 단�
 통계는 접수 시각의 시작 이상·종료 미만, 기본 최근 24시간, 최대 31일이다. 시간별 통계는 UTC이고 빈 구간은 생략한다. UNKNOWN/진행 중/명확한 실패를 분리하고 평균 시간은 종료된 요청만 계산한다. 두 통계 endpoint는 각 호출 시점의 DB 집계이므로 동시에 전송 중이면 호출 간 수치가 달라질 수 있다. 전문은 기존 마스킹 snapshot만 읽고 이벤트에는 전문/예외 원문을 저장하지 않는다. 대상 DB를 직접 조회하는 서비스 간 결합은 추가하지 않는다. 대상 수신은 기존 헤더 전파·응답 계약과 별도 Target 수신 기록으로 검증한다.
 
 제약: DB 저장에 실패하거나 프로세스가 종료되면 미완료 상태가 남을 수 있다. 이 경우 UNKNOWN/실패를 임의 확정하지 않으며 lease 복구는 Phase 5다. V3는 과거 Attempt를 합성하지 않는다. 장점은 상태와 관측 기록의 일관성이고 비용은 이벤트 저장 증가다. 관련 코드: RequestLifecycle, MonitoringMapper/XML, MonitoringController.
+
+## ADR-011 · 2026-10-19 · 요청 범위 장애와 실제 통신
+
+상황: 전역 장애 플래그는 다른 사용자의 정상 전송을 바꾸고 재현 횟수도 경쟁 상태에 놓인다. 선택지: 프로세스 전역 상태 / Target DB 소유의 불변 시나리오. 결정: Target V2 IF_SIMULATION에 UUID·유형·Interface ID·Request ID·옵션·만료·수신 횟수를 저장한다. Integration은 실제 HTTP로 등록/조회하고 명시적인 execute API에서만 UUID 헤더를 전달한다. 일반 전송은 시나리오를 조회하거나 헤더를 전달하지 않는다. Integration V4 요청에는 simulation_id만 저장하며 서비스 간 FK는 만들지 않는다.
+
+Target은 scope/만료/최대 20회 수신을 조건으로 한 UPDATE RETURNING에서 순번을 원자적으로 배정하고 수신 기록과 함께 짧은 트랜잭션으로 커밋한다. 지연·응답 작성은 커밋 후 수행한다. FAIL_THEN_SUCCESS는 Target 도착 순번 중 처음 N회 500, DUPLICATE는 같은 시나리오의 두 번째 수신부터 409 SIMULATED_DUPLICATE다. 두 동작은 실험용이며 업무 멱등성이나 자동 재시도가 아니다. 매 execute는 별도 내부 요청 UUID와 Attempt이고 Request ID는 동일하다. Trace는 상위 헤더가 없으면 실행마다 새로 발급된다.
+
+수명은 생성 후 최대 1시간, UI 기본 15분이다. 지연 최대 15초, 실패 횟수 최대 5다. TIMEOUT 지연은 실제 접수한 불변 인터페이스 버전의 timeoutMs보다 길어야 한다. 조건이 잘못되면 접수와 이벤트를 함께 롤백한다. Target에서 만료/범위/한도 확인에 실패하면 409이며 일반 정상 동작으로 조용히 바꾸지 않는다. 설정은 수정·삭제하지 않으며 새 실험은 새 UUID로 만든다.
+
+연결 실패는 응답 코드로 흉내 내지 않는다. CONNECTION_FAILURE만 서버 설정 CONNECTION_FAILURE_URL(기본 loopback port 1)로 실제 HTTP를 시도한다. UI/API에 URL 입력은 없다. 해당 주소가 닫혀 있어야 실제 접속 실패가 재현되며, Target 제어 API는 먼저 정상 접근 가능해야 한다. Target에 도달하지 않아 수신 counter/receipt가 없고 Integration Attempt는 UNKNOWN/TARGET_IO_ERROR다. 이 경로의 실행 횟수는 Target 수신 한도에 포함되지 않는다. Target에서 이 유형을 직접 수신하면 400으로 거절한다.
+
+HTTP 400/중복 409는 FAILED, HTTP 500/Timeout/I/O/잘못된 응답은 UNKNOWN을 유지한다. Timeout이어도 Target 수신 기록은 존재할 수 있으며 자동 성공/실패 보정은 하지 않는다. SIMULATIONS_ENABLED=false로 Target의 제어·실행을 비활성화할 수 있다. 동기 지연은 bounded servlet thread를 점유하며 작업 큐·인증·재시도/멱등성·종료 복구는 후속 범위다. 장점은 다른 전송과의 격리 및 재현성이고 비용은 제어용 HTTP 왕복과 시나리오/수신 보관이다. 관련 코드: 양쪽 SimulationController, Target SimulationService/Mapper, RequestLifecycle, TransmissionService, Target ReceiveController.

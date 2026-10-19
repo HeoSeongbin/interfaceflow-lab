@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="lab.interfaceflow.integration.RequestMapper">
+ <update id="simulation">UPDATE integration.if_request SET simulation_id=CAST(#{simulationId} AS uuid) WHERE id=CAST(#{id} AS uuid)</update>
  <insert id="insert">
   INSERT INTO integration.if_request(id,request_id,interface_id,trace_id,status,source_system,interface_version,original_payload,processing_stage)
   VALUES(CAST(#{id} AS uuid),#{request.requestId},#{request.interfaceId},#{traceId},'VALIDATING',#{definition.sourceSystem},#{definition.version},CAST(#{original} AS jsonb),'SOURCE_VALIDATION')
@@ -33,7 +34,7 @@
  <select id="count" resultType="long">SELECT count(*) FROM integration.if_request <include refid="filter"/></select>
  <select id="detail" resultType="string">
   SELECT jsonb_build_object('id',r.id,'requestId',r.request_id,'interfaceId',r.interface_id,'traceId',r.trace_id,'attemptId',r.attempt_id,
-   'status',r.status,'interfaceVersion',r.interface_version,'processingStage',r.processing_stage,'errorCode',r.error_code,
+   'status',r.status,'simulationId',r.simulation_id,'interfaceVersion',r.interface_version,'processingStage',r.processing_stage,'errorCode',r.error_code,
    'httpStatus',r.http_status,'durationMs',r.duration_ms,'createdAt',r.created_at,'originalPayload',r.original_payload,
    'mappedPayload',r.mapped_payload,'response',r.response_payload,'errors',r.validation_errors,'interfaceSnapshot',v.snapshot)::text
   FROM integration.if_request r LEFT JOIN integration.if_interface_version v ON v.interface_id=r.interface_id AND v.version=r.interface_version

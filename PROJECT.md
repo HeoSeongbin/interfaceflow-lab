@@ -1463,3 +1463,7 @@ Phase 2 이후의 고급 기능을 먼저 구현하지 않는다.
 ## 25. 현재 구현 범위 — 2026-10-19 Phase 3
 
 사용자의 Phase 3 진행 요청에 따라 Integration 단계별 이벤트와 HTTP Attempt 원자적 저장, Trace Explorer, 이력 기간·시간·오류 표시, 기간별 DB 집계 대시보드를 추가했다. Request/Trace/Attempt 의미 및 HTTP 트랜잭션 경계를 유지한다. Target 내부 수신·응답 생성은 구조화 로그에 남으며 Integration Explorer의 이벤트와 구분한다. 과거 누락 이벤트/Attempt를 합성하지 않는다. 세부 단계별 실행시간·중앙 로그 수집·재처리 대기·재시도·멱등성은 제공하지 않는다. 검증 범위와 실제 결과는 PROGRESS를 따른다.
+
+## 26. 현재 구현 범위 — 2026-10-19 Phase 4
+
+사용자의 다음 Phase 요청에 따라 요청 범위·유효기간이 있는 Target DB 시나리오, 실제 HTTP 오류/지연/Timeout/응답 계약 오류/실패 후 성공/중복 실험과 고정된 닫힌 주소의 실제 연결 실패, Simulation Lab UI를 추가했다. 일반 전송과 격리하며 기존 상태·Trace·Attempt·트랜잭션 정책을 유지한다. 중복 실험은 시나리오 내 반복 수신 409일 뿐 업무 멱등성은 아니다. 자동/수동 재처리와 복구는 Phase 5에 남긴다. 검증 범위·제약은 PROGRESS/API/ADR-011을 따른다.

@@ -20,6 +20,17 @@ public class RequestLifecycle {
         this.interfaces=interfaces;this.mapper=mapper;this.redactor=redactor;this.json=json;this.monitoring=monitoring;
     }
     @Transactional
+    public Accepted acceptSimulation(SendRequest request,String traceId,lab.interfaceflow.common.Simulations.Scenario scenario){
+        if(!request.interfaceId().equals(scenario.interfaceId()) || !request.requestId().equals(scenario.requestId()))
+            throw new ApiProblem(409,"SIMULATION_SCOPE_MISMATCH","시나리오의 Interface ID와 Request ID를 유지하세요.");
+        if(!scenario.expiresAt().isAfter(java.time.Instant.now())) throw new ApiProblem(409,"SIMULATION_EXPIRED","시나리오가 만료되었습니다.");
+        var accepted=accept(request,traceId);
+        if(scenario.type()==lab.interfaceflow.common.Simulations.Type.TIMEOUT && scenario.delayMs()<=accepted.definition().timeoutMs())
+            throw new ApiProblem(400,"INVALID_TIMEOUT_SCENARIO","지연시간은 접수된 인터페이스의 timeoutMs보다 길어야 합니다.");
+        changed(mapper.simulation(accepted.id(),scenario.id()));
+        return accepted;
+    }
+    @Transactional
     public Accepted accept(SendRequest request,String traceId) {
         var definition=interfaces.forDispatch(request.interfaceId());
         String id=UUID.randomUUID().toString();

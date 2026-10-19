@@ -2,7 +2,7 @@
 
 Java Spring Boot와 React로 구현하는 시스템 연동 검증·장애 시뮬레이션 포트폴리오입니다. 공개 가능한 가상 데이터만 사용합니다.
 
-현재 구현 범위는 **Phase 3 — 추적 및 모니터링**입니다. DB 기반 인터페이스·설정 버전·필드 매핑·Source/Target 검증·변환 미리보기·마스킹된 전문 이력을 제공합니다. 두 독립 Spring Boot 서버는 실제 HTTP로 통신합니다. 장애 시뮬레이션·재시도·멱등성은 후속 단계입니다.
+현재 구현 범위는 **Phase 4 — 장애 시뮬레이션**입니다. DB 기반 인터페이스·설정 버전·필드 매핑·Source/Target 검증·변환 미리보기·마스킹된 전문 이력을 제공합니다. 두 독립 Spring Boot 서버는 실제 HTTP로 통신합니다. 요청별 장애 시나리오를 실제 HTTP로 재현하며 재시도·멱등성은 후속 단계입니다.
 
 ```mermaid
 flowchart LR
@@ -95,7 +95,7 @@ mvn -B -s .mvn/settings.xml verify
 ./scripts/Test-Smoke.ps1 -BrowserTests
 ```
 
-스크립트는 두 JVM과 개발 프록시를 연결하여 데스크톱·모바일 너비의 Playwright 테스트 20건을 실행합니다. 정상 전송은 실제 HTTP와 PostgreSQL을 사용하며, 네트워크 중단·HTML 502 피드백만 별도 오류 주입으로 검사합니다. 각 전송은 테스트 이력을 남기므로 폐기 가능한 DB를 사용하세요. Edge는 `PLAYWRIGHT_CHANNEL=msedge`, Playwright Chromium은 `npx playwright install chromium` 후 `PLAYWRIGHT_CHANNEL=chromium`을 지정할 수 있습니다.
+스크립트는 두 JVM과 개발 프록시를 연결하여 데스크톱·모바일 너비의 Playwright 테스트 24건을 실행합니다. 정상 전송은 실제 HTTP와 PostgreSQL을 사용하며, 네트워크 중단·HTML 502 피드백만 별도 오류 주입으로 검사합니다. 각 전송은 테스트 이력을 남기므로 폐기 가능한 DB를 사용하세요. Edge는 `PLAYWRIGHT_CHANNEL=msedge`, Playwright Chromium은 `npx playwright install chromium` 후 `PLAYWRIGHT_CHANNEL=chromium`을 지정할 수 있습니다.
 
 이미 실행 중인 Compose 스택을 검사하려면 frontend 폴더에서 `E2E_BASE_URL=http://127.0.0.1:5173`, `E2E_DB_URL=postgresql://127.0.0.1:5432/interfaceflow`, 해당 DB_USER/DB_PASSWORD 환경 변수를 설정한 뒤 `npm run test:e2e`를 실행합니다. E2E_BASE_URL을 지정하지 않으면 Vite가 15173 포트에서 시작되며 `API_PROXY_TARGET`(기본 localhost:8080)을 사용합니다. 테스트용 DB 연결 변수는 브라우저 번들로 전달하지 않습니다.
 
@@ -107,7 +107,7 @@ GitHub Actions에 Java 21/Node 22와 Testcontainers 검증, Compose 전체 스�
 
 - 객체 점 경로와 COPY/STRING/NUMBER/BOOLEAN/DATE만 지원합니다. 배열 값 전체 복사는 가능하지만 배열 인덱스·와일드카드·스크립트 변환은 지원하지 않습니다. 매핑 배열이 비어 있으면 독립적인 원본 복사입니다.
 - 같은 Request ID를 다시 보내면 현재 별도 전송됩니다. 멱등성·자동/수동 재시도·프로세스 종료 복구는 Phase 5입니다.
-- Timeout/5xx/응답 계약 오류는 UNKNOWN으로 기록합니다. 장애 시나리오 선택 UI와 재현 API는 Phase 4입니다. 연결 실패는 target을 중단하여 실제로 확인할 수 있습니다.
+- Timeout/5xx/응답 계약 오류는 UNKNOWN으로 기록합니다. Simulation Lab에서 범위가 제한된 실제 오류를 재현합니다. 연결 실패는 서버 설정의 닫힌 주소로 HTTP 접속을 시도합니다.
 - DB·조회·미리보기에는 민감 키와 민감 source의 매핑 target을 마스킹한 전문을 사용합니다. 실제 HTTP 데이터는 변경하지 않습니다. 마스킹된 이력은 원본 재처리에 사용할 수 없으며 보호된 원본 저장은 후속 설계 대상입니다. Trace Explorer는 V3 이후 실제 저장된 이벤트를 제공합니다. 이전 기록의 단계·Attempt 시간은 생성하지 않습니다.
 - 인증은 미구현입니다. Compose는 localhost에만 노출합니다. 프론트엔드만 GitHub Pages에 배포해도 백엔드는 실행되지 않습니다.
 - 실제 HTTP 통신과 기록의 기반 단계이며 exactly-once 전달을 보장하지 않습니다.
@@ -120,3 +120,20 @@ V2 Flyway migration은 기존 Phase 1 요청을 보존합니다. 이전 기록�
 
 
 Phase 3 통계 기간은 시간대가 포함된 ISO Instant이며 기본 최근 24시간, 최대 31일, 시작 이상·종료 미만입니다. 이력 기간 입력은 브라우저 로컬 시간입니다. UNKNOWN은 실패 수와 구분하고 재처리 대기는 미구현으로 표시합니다. 이벤트 시각은 저장 시각이며 세부 단계 실행시간이 아닙니다. Target 내부 TARGET_RECEIVED/TARGET_RESPONDED는 동일 Trace/Request/Attempt ID의 구조화 로그로 확인하며 Explorer에 Target 내부 이벤트를 수집하지는 않습니다. Trace당 조회는 최대 100개 요청이며 초과하면 개별 전송 이력으로 조회합니다. API·시간 정의는 [ADR-010](docs/DECISIONS.md)과 [API](docs/API.md)를 참고하세요.
+
+
+## Simulation Lab 사용
+
+1. **Simulation Lab**에서 인터페이스·장애 유형·Request ID를 선택하고 **시나리오 등록**을 누릅니다. UI 시나리오는 15분 유효하며 일반 전문 전송에는 영향을 주지 않습니다.
+2. 가상 전문을 입력하고 **시나리오 실행**을 누릅니다. 내부 요청 UUID/Trace/Attempt와 상태·HTTP·오류를 비교하고 Trace Explorer로 상세를 조회합니다.
+3. FAIL_THEN_SUCCESS는 같은 시나리오를 설정 횟수보다 많이 실행하면 500 이후 성공합니다. DUPLICATE는 첫 실행 성공, 두 번째부터 409입니다. 자동 재시도·업무 멱등성은 아닙니다.
+4. TIMEOUT 지연은 선택한 인터페이스의 timeoutMs보다 길게, 최대 15000ms로 설정합니다. 응답이 늦어 UNKNOWN이어도 Target 수신 기록이 남을 수 있습니다. DELAY가 timeout을 넘는 경우도 UNKNOWN입니다.
+5. **새 실험**은 새 UUID로 등록하기 위한 화면 초기화입니다. 기존 시나리오를 삭제하지 않습니다. 목록 조회로 최근 100개 설정과 Target 수신 횟수를 확인할 수 있습니다.
+
+SUCCESS, HTTP_400, HTTP_500, DELAY, TIMEOUT, INVALID_RESPONSE, FAIL_THEN_SUCCESS, DUPLICATE, CONNECTION_FAILURE를 제공합니다. 오류 응답은 실제 Target JVM에서 발생합니다. CONNECTION_FAILURE는 Target 제어 API에서 시나리오를 읽은 후 서버 설정 `CONNECTION_FAILURE_URL`(기본 `http://127.0.0.1:1`)로 실제 연결을 시도합니다. 해당 주소가 닫혀 있어야 접속 오류가 재현됩니다. UI에 임의 URL을 입력하는 기능은 없습니다. 이 경로는 Target 수신 횟수와 receipt를 만들지 않습니다.
+
+Target의 `SIMULATIONS_ENABLED=false`로 시나리오 등록·조회·실행을 비활성화할 수 있으며 일반 전송은 유지됩니다. Compose는 `.env`의 해당 변수와 `CONNECTION_FAILURE_URL`을 전달합니다. 기본 실행은 localhost 개발 실험용이고 인증은 미구현입니다. 직접 실행 시 두 값은 각각 Target/Integration 터미널에서 설정합니다.
+
+Target 도착 시 시나리오 UUID와 Interface/Request ID, 만료, 최대 20회 수신을 검사합니다. 반복 실행은 같은 Request ID지만 별도 내부 요청·Attempt이며 Trace는 상위 헤더가 없으면 새로 발급됩니다. 제어 API 장애는 502로 응답하고 아직 전송 요청을 접수하지 않습니다. 지연 중 DB 트랜잭션을 유지하지 않으며 동기 HTTP 스레드는 응답 대기 동안 사용합니다. 시나리오·전문 자동 보관 삭제와 재시도/복구는 아직 없습니다. 상세 계약과 제한은 [API](docs/API.md), [ADR-011](docs/DECISIONS.md)에 있습니다.
+
+검증 화면: [Simulation Lab](docs/screenshots/phase4-simulation.png), [모바일 너비](docs/screenshots/phase4-simulation-mobile.png).
