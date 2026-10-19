@@ -65,3 +65,13 @@ Source Validation → Mapping → Target Validation을 분리한다. 실패 단�
 수동 재처리는 아직 없으므로 마스킹된 전문을 원본처럼 재전송하지 않는다. Phase 5에서 보호된 재처리 원본 보관 방식을 별도로 설계해야 한다. 권장 진단 이력 보관은 30일이며 이번 단계에서는 자동 삭제를 구현하지 않는다. 운영자가 필요 시 ARCHITECTURE의 terminal 이력 정리 SQL을 검토해 적용한다.
 
 조회는 내부 UUID를 사용하여 논리 Request ID의 고유성 범위와 혼동하지 않는다. 목록은 최대 100건/page이며 목록과 count는 짧은 REPEATABLE_READ 트랜잭션으로 읽는다. 검증/매핑 실패는 Attempt ID가 null이고 SENDING 이전 실패로 저장한다. 자동 재시도·멱등성·UNKNOWN 재처리 정책은 변경하지 않는다. 관련 코드: RequestLifecycle, RequestMapper, PayloadRedactor, TransmissionService.
+
+## ADR-010 · 2026-10-19 · Phase 3 추적의 원자성과 통계 의미
+
+상황: 요청의 마지막 상태만으로 이전 단계 및 각 HTTP 시도를 확인할 수 없었다. 선택지: 로그 파일 파싱 / DB 이벤트와 Attempt 모델. 결정: V3 IF_TRACE_EVENT와 IF_ATTEMPT를 추가한다. 접수·설정 조회·검증 결과·전송 시작·응답 처리·완료는 각각 짧은 트랜잭션에서 기존 요청 CAS 상태 변경과 함께 저장한다. HTTP 호출은 트랜잭션 밖에 유지한다. Attempt 1은 실제 HTTP 호출 직전에 생성하고 요청/Trace ID를 유지한다. Phase 3에서는 재시도하지 않는다.
+
+검증 엔진은 결정적 순서로 실행되므로 반환된 실패 단계까지의 결과를 순서대로 저장한다. 이벤트 recorded_at은 DB 기록 시각이며 세부 단계의 실행 시작/소요시간을 의미하지 않는다. 전체 요청 시간은 단조 시계, Attempt 시간은 DB 시작/완료 시각 차이이며 HTTP 외 기록 처리 비용도 포함한다. 기존 기록에 존재하지 않는 이벤트나 시간을 역산하지 않는다. 조회는 내부 UUID별로 구분하여 같은 Trace ID의 복수 요청을 허용한다. Trace 조회는 100개 요청 한도이며 초과 시 422를 반환한다.
+
+통계는 접수 시각의 시작 이상·종료 미만, 기본 최근 24시간, 최대 31일이다. 시간별 통계는 UTC이고 빈 구간은 생략한다. UNKNOWN/진행 중/명확한 실패를 분리하고 평균 시간은 종료된 요청만 계산한다. 두 통계 endpoint는 각 호출 시점의 DB 집계이므로 동시에 전송 중이면 호출 간 수치가 달라질 수 있다. 전문은 기존 마스킹 snapshot만 읽고 이벤트에는 전문/예외 원문을 저장하지 않는다. 대상 DB를 직접 조회하는 서비스 간 결합은 추가하지 않는다. 대상 수신은 기존 헤더 전파·응답 계약과 별도 Target 수신 기록으로 검증한다.
+
+제약: DB 저장에 실패하거나 프로세스가 종료되면 미완료 상태가 남을 수 있다. 이 경우 UNKNOWN/실패를 임의 확정하지 않으며 lease 복구는 Phase 5다. V3는 과거 Attempt를 합성하지 않는다. 장점은 상태와 관측 기록의 일관성이고 비용은 이벤트 저장 증가다. 관련 코드: RequestLifecycle, MonitoringMapper/XML, MonitoringController.

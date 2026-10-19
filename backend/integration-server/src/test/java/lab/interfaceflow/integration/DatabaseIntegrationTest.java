@@ -25,13 +25,14 @@ class DatabaseIntegrationTest {
   target.createContext("/api/receive",e->{String trace=e.getRequestHeaders().getFirst("X-Trace-Id");String request=e.getRequestHeaders().getFirst("X-Request-Id");byte[] body=("{\"code\":\"OK\",\"requestId\":\""+request+"\",\"traceId\":\""+trace+"\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);lastPayload=new com.fasterxml.jackson.databind.ObjectMapper().readTree(e.getRequestBody()).path("payload");received.incrementAndGet();
    var waiting=block;
    if(waiting!=null){arrived.countDown();try{waiting.await(15,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}}
-   e.getResponseHeaders().set("Content-Type","application/json");e.sendResponseHeaders(200,body.length);e.getResponseBody().write(body);e.close();});target.start();
+   e.getResponseHeaders().set("Content-Type","application/json");e.sendResponseHeaders(targetStatus.get(),body.length);e.getResponseBody().write(body);e.close();});target.start();
   r.add("lab.target-url",()->"http://127.0.0.1:"+target.getAddress().getPort());
  }
  @AfterAll static void close(){if(target!=null)target.stop(0); if(db!=null)db.stop();}
  static com.sun.net.httpserver.HttpServer target;
  static final java.util.concurrent.atomic.AtomicInteger received=new java.util.concurrent.atomic.AtomicInteger();
  static volatile com.fasterxml.jackson.databind.JsonNode lastPayload;
+ static final java.util.concurrent.atomic.AtomicInteger targetStatus=new java.util.concurrent.atomic.AtomicInteger(200);
  static volatile java.util.concurrent.CountDownLatch block,arrived;
  private final com.fasterxml.jackson.databind.ObjectMapper json=new com.fasterxml.jackson.databind.ObjectMapper();
  private com.fasterxml.jackson.databind.node.ObjectNode configuration(){
@@ -156,7 +157,7 @@ class DatabaseIntegrationTest {
   assertEquals(requestId,first.path("requestId").asText());assertEquals(requestId,second.path("requestId").asText());
   assertNotEquals(first.path("attemptId"),second.path("attemptId"));assertNotEquals(first.path("id"),second.path("id"));
   var history=http.getForObject("/api/requests?query="+requestId+"&size=1",com.fasterxml.jackson.databind.JsonNode.class);
-  assertEquals(2,history.path("total").asInt());assertEquals(1,history.path("items").size());
+  assertEquals(2,history.path("total").asLong());assertEquals(1,history.path("items").size());
  }
  @Test void numericBoundsKeepJsonDecimalPrecision(){
   var draft=configuration();draft.set("mappings",json.createArrayNode());
@@ -164,5 +165,72 @@ class DatabaseIntegrationTest {
   var definition=create(draft);int before=received.get();
   var result=send(definition.path("interfaceId").asText(),json.createObjectNode().put("amount",new java.math.BigDecimal("0.10000000000000001")));
   assertEquals("VALIDATION_FAILED",result.path("status").asText());assertEquals("maxValue",result.path("errors").get(0).path("rule").asText());assertEquals(before,received.get());
+ }
+
+ @Test void traceAndDashboardReflectActualLifecycle(){
+  var definition=create(configuration());
+  var success=send(definition.path("interfaceId").asText(),payload());
+  String trace=success.path("traceId").asText();
+  var rows=http.getForObject("/api/traces/"+trace,com.fasterxml.jackson.databind.JsonNode.class);
+  assertEquals(1,rows.size());
+  assertEquals(8,rows.get(0).path("events").size());
+  assertEquals("REQUEST_RECEIVED",rows.get(0).path("events").get(0).path("stage").asText());
+  var attempt=rows.get(0).path("attempts").get(0);
+  assertEquals(success.path("attemptId").asText(),attempt.path("id").asText());
+  assertEquals("SUCCESS",attempt.path("status").asText());assertTrue(attempt.path("duration_ms").asLong()>=0);
+  var failed=send(definition.path("interfaceId").asText(),json.createObjectNode());
+  var failureTrace=http.getForObject("/api/traces/"+failed.path("traceId").asText(),com.fasterxml.jackson.databind.JsonNode.class).get(0);
+  assertEquals(0,failureTrace.path("attempts").size());assertEquals(3,failureTrace.path("events").size());
+  assertEquals("VALIDATION_FAILED",failureTrace.path("events").get(2).path("outcome").asText());
+  var summary=http.getForObject("/api/dashboard/summary",com.fasterxml.jackson.databind.JsonNode.class);
+  assertTrue(summary.path("recentErrors").isArray());assertTrue(summary.path("interfaces").isArray());assertTrue(summary.path("success").asLong()>0);assertTrue(summary.path("failed").asLong()>0);
+  assertEquals(summary.path("total").asLong(),summary.path("success").asLong()+summary.path("failed").asLong()+summary.path("unknown").asLong()+summary.path("inProgress").asLong());
+  assertTrue(http.getForObject("/api/dashboard/statistics",com.fasterxml.jackson.databind.JsonNode.class).isArray());
+  assertEquals(400,http.getForEntity("/api/traces/bad",String.class).getStatusCode().value());
+  assertEquals(404,http.getForEntity("/api/traces/"+UUID.randomUUID().toString().replace("-",""),String.class).getStatusCode().value());
+  assertEquals(400,http.getForEntity("/api/dashboard/summary?from=2026-10-19T00:00:00Z&to=2026-10-18T00:00:00Z",String.class).getStatusCode().value());
+ }
+
+
+ @Autowired RequestLifecycle lifecycle;
+ @Test void rejectedTransitionCannotCreateAnotherAttempt(){
+  var result=send(create(configuration()).path("interfaceId").asText(),payload());
+  String id=result.path("id").asText();
+  assertThrows(IllegalStateException.class,()->lifecycle.sending(id,UUID.randomUUID().toString()));
+  assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM integration.if_attempt WHERE request_key=CAST(? AS uuid)",Integer.class,id));
+  assertEquals(8,jdbc.queryForObject("SELECT count(*) FROM integration.if_trace_event WHERE request_key=CAST(? AS uuid)",Integer.class,id));
+ }
+ @Test void sharedTraceKeepsIndependentRequestsAndPeriodIsHalfOpen(){
+  var definition=create(configuration());String trace=UUID.randomUUID().toString().replace("-","");
+  var headers=new HttpHeaders();headers.setContentType(MediaType.APPLICATION_JSON);headers.set("X-Trace-Id",trace);
+  for(int i=0;i<2;i++){
+   var body=new lab.interfaceflow.common.Contracts.SendRequest(definition.path("interfaceId").asText(),"REPEATED",payload());
+   assertEquals(200,http.postForEntity("/api/requests",new HttpEntity<>(body,headers),String.class).getStatusCode().value());
+  }
+  var rows=http.getForObject("/api/traces/"+trace,com.fasterxml.jackson.databind.JsonNode.class);
+  assertEquals(2,rows.size());assertNotEquals(rows.get(0).path("request").path("id"),rows.get(1).path("request").path("id"));
+  long baseline=jdbc.queryForObject("SELECT count(*) FROM integration.if_request WHERE created_at >= TIMESTAMPTZ '2001-01-01T00:00:00Z' AND created_at < TIMESTAMPTZ '2001-01-01T01:00:00Z'",Long.class);
+  jdbc.update("UPDATE integration.if_request SET created_at='2001-01-01T00:00:00Z' WHERE trace_id=?",trace);
+  var period="?from=2001-01-01T00:00:00Z&to=2001-01-01T01:00:00Z";
+  assertEquals(baseline+2,http.getForObject("/api/dashboard/summary"+period,com.fasterxml.jackson.databind.JsonNode.class).path("total").asLong());
+  assertEquals(0,http.getForObject("/api/dashboard/summary?from=2000-12-31T23:00:00Z&to=2001-01-01T00:00:00Z",com.fasterxml.jackson.databind.JsonNode.class).path("total").asLong());
+  assertEquals(2,http.getForObject("/api/requests"+period+"&query="+trace,com.fasterxml.jackson.databind.JsonNode.class).path("total").asLong());
+ }
+
+ @Test void uncertainHttpResultRemainsUnknownInAttemptAndEvents(){
+  var definition=create(configuration());
+  try {
+   for(int code:new int[]{500,400}) {
+    targetStatus.set(code);
+    var result=send(definition.path("interfaceId").asText(),payload());
+    String expected=code==500?"UNKNOWN":"FAILED";
+    assertEquals(expected,result.path("status").asText());
+    var row=http.getForObject("/api/traces/"+result.path("traceId").asText(),com.fasterxml.jackson.databind.JsonNode.class).get(0);
+    assertEquals(expected,row.path("attempts").get(0).path("status").asText());
+    assertEquals(code,row.path("attempts").get(0).path("http_status").asInt());
+    assertEquals(expected,row.path("events").get(7).path("outcome").asText());
+    assertEquals(result.path("attemptId").asText(),row.path("events").get(7).path("attempt_id").asText());
+   }
+  } finally {targetStatus.set(200);}
  }
 }

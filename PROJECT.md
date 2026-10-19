@@ -1459,3 +1459,7 @@ Phase 2 이후의 고급 기능을 먼저 구현하지 않는다.
 검증/매핑 실패는 Attempt ID 없이 단계별 오류로 저장하고 HTTP를 호출하지 않는다. 접수 시 불변 설정 버전을 고정하며 HTTP 동안 DB 트랜잭션을 유지하지 않는다. 요청 고유성/멱등성/자동·수동 재시도/전체 Trace 타임라인은 아직 구현하지 않았다. Docker Compose/Testcontainers/원격 CI의 미검증 상태도 유지한다.
 
 배열 인덱스·와일드카드·사용자 스크립트·시간대 날짜 변환과 보호된 재처리 원본 저장은 지원하지 않는다. 현재 지원은 객체 점 경로, 배열 값 전체 복사, LocalDate/LocalDateTime, 마스킹된 진단 snapshot이다. 최종 요구사항을 완료한 것으로 해석하지 않는다.
+
+## 25. 현재 구현 범위 — 2026-10-19 Phase 3
+
+사용자의 Phase 3 진행 요청에 따라 Integration 단계별 이벤트와 HTTP Attempt 원자적 저장, Trace Explorer, 이력 기간·시간·오류 표시, 기간별 DB 집계 대시보드를 추가했다. Request/Trace/Attempt 의미 및 HTTP 트랜잭션 경계를 유지한다. Target 내부 수신·응답 생성은 구조화 로그에 남으며 Integration Explorer의 이벤트와 구분한다. 과거 누락 이벤트/Attempt를 합성하지 않는다. 세부 단계별 실행시간·중앙 로그 수집·재처리 대기·재시도·멱등성은 제공하지 않는다. 검증 범위와 실제 결과는 PROGRESS를 따른다.

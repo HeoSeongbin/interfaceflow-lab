@@ -71,7 +71,7 @@ sequenceDiagram
     API-->>UI: result, version, redacted JSON, field errors
 ```
 
-현재 상태 전환은 VALIDATING → VALIDATION_FAILED / MAPPING_FAILED / READY → SENDING → SUCCESS / FAILED / UNKNOWN이다. 각 UPDATE는 기대 상태를 확인한다. 전체 상태 전환 이벤트와 별도 IF_REQUEST_ATTEMPT는 Phase 3~5에서 도입한다. 검증 실패에는 Attempt ID를 만들지 않는다. 설정 수정/삭제는 배타 잠금과 version 비교를 사용하며 접수와 경쟁하지 않는다. HTTP 대기 중에는 정의 잠금이 없다.
+현재 상태 전환은 VALIDATING → VALIDATION_FAILED / MAPPING_FAILED / READY → SENDING → SUCCESS / FAILED / UNKNOWN이다. 각 UPDATE는 기대 상태를 확인한다. Phase 3는 IF_TRACE_EVENT와 IF_ATTEMPT로 단계 및 HTTP 시도를 저장한다. 재시도/복구 확장은 Phase 5다. 검증 실패에는 Attempt ID를 만들지 않는다. 설정 수정/삭제는 배타 잠금과 version 비교를 사용하며 접수와 경쟁하지 않는다. HTTP 대기 중에는 정의 잠금이 없다.
 
 요청 목록/상세는 RequestLifecycle이 관리하고 XML Mapper만으로 SQL을 실행한다. 목록/총 건수는 REPEATABLE_READ로 일관되게 읽고, 외부 HTTP는 이 트랜잭션에도 포함하지 않는다. 페이지 최대 100, 검색 최대 160자, 모든 SQL 값은 #{} 바인딩이다.
 
@@ -90,3 +90,7 @@ WHERE created_at < now() - interval '30 days'
 ```
 
 인증, 임의 민감 문자열 탐지, 보호된 원문 저장, 타임라인/통계/재시도/멱등성은 이번 Phase에 포함하지 않는다. Docker/원격 CI 검증의 미완료 상태는 PROGRESS에 별도로 남긴다.
+
+## Phase 3 추적 저장
+
+V3는 요청 소유의 IF_TRACE_EVENT와 IF_ATTEMPT를 추가한다. FK는 요청 삭제 시 함께 정리되며 Attempt 이벤트 참조도 보존한다. 요청 상태 변경과 이벤트/Attempt 기록은 같은 짧은 DB 트랜잭션에서 커밋되고 HTTP는 밖에서 실행한다. Trace endpoint는 단일 SQL snapshot으로 요청·이벤트·시도를 조회한다. 과거 데이터는 역산하지 않는다. 통계의 시간·분류·한계는 ADR-010/API 계약을 따른다. 기록에는 진단 마스킹 snapshot만 사용하며 이벤트에 원문이나 임의 메시지를 추가하지 않는다.

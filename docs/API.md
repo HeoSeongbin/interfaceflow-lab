@@ -94,3 +94,12 @@ password/passwd/token/access_token/refresh_token/authorization/secret/api_key/em
 Target POST /api/receive는 같은 SendRequest DTO와 필수 X-Trace-Id / X-Request-Id / X-Attempt-Id를 받는다. Request ID는 본문과 같아야 하고 Trace ID는 32자리 소문자 hex, Attempt ID는 8-4-4-4-12 UUID다. 수신 메타데이터를 저장한 뒤 OK와 Request/Trace ID를 응답한다. Target의 비즈니스 스키마 관리·장애·멱등성은 후속 단계다.
 
 GET /actuator/health는 DB 상태를 포함한다. Trace 타임라인·Attempt 별도 테이블·통계·재처리·시뮬레이션 API는 아직 제공하지 않는다.
+
+## Phase 3 추적·모니터링 API
+
+- `GET /api/traces/{traceId}`: 소문자 hex 32자리. 내부 UUID별 request/마스킹된 전문/검증 결과, events, attempts 배열. 미존재 404, 잘못된 ID 400, 100개 요청 초과 422. 이벤트와 Attempt의 세부 필드는 DB 모델 snake_case이다. 이전 기록의 events/attempts는 빈 배열일 수 있다.
+- `GET /api/dashboard/summary?from=ISO_INSTANT&to=ISO_INSTANT`: total, success, failed(FAILED/VALIDATION_FAILED/MAPPING_FAILED), unknown, inProgress, averageDurationMs(종료 요청만, 없으면 null), recentErrors(최대 10), interfaces(인터페이스/상태별 건수).
+- `GET /api/dashboard/statistics`: 같은 기간 필터. UTC hour/status/count 배열, 빈 구간 생략. 기본 24시간, 최대 31일, 시작 이상·종료 미만. 잘못된 기간은 400. 요약과 통계는 개별 조회 시점 집계다.
+- `GET /api/requests`: 선택 `from`/`to` ISO Instant 기간 필터 추가. 기존 검색·상태·페이지 계약 유지. 한쪽 경계만 지정할 수 있고 양쪽이 있으면 from < to여야 한다.
+
+이벤트는 REQUEST_RECEIVED, INTERFACE_RESOLVED, SOURCE_VALIDATION, FIELD_MAPPING, TARGET_VALIDATION, REQUEST_DISPATCHED, RESPONSE_PROCESSED, REQUEST_COMPLETED 순서다. 실패 이후 단계는 없다. validation/mapping 실패에는 Attempt가 없다. 단계 시각은 기록 시각이며 단계별 실행시간을 측정한 값이 아니다. HTTP Attempt는 시작/완료, 상태, HTTP 상태, 오류 코드, 소요시간을 제공한다. 자동/수동 재시도는 제공하지 않는다.

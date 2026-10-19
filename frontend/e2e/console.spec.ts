@@ -196,3 +196,23 @@ test('theme, keyboard focus and narrow layout remain usable', async ({ page }, t
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('console-light.png'), fullPage: true });
 });
+
+test('trace explorer and dashboard show actual persisted processing', async ({ page }) => {
+  const requestId=`TRACE-${crypto.randomUUID()}`;
+  await page.getByLabel('Request ID').fill(requestId);
+  const pending=page.waitForResponse(r=>r.url().endsWith('/api/requests')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'전문 전송 →'}).click();
+  const result=await (await pending).json();
+  expect(result.status).toBe('SUCCESS');
+  await page.getByRole('button',{name:'Trace Explorer',exact:true}).filter({visible:true}).click();
+  await page.getByLabel('Trace ID 검색').fill(result.traceId);
+  await page.getByRole('button',{name:'흐름 조회'}).click();
+  await expect(page.getByText('REQUEST_RECEIVED · VALIDATING')).toBeVisible();
+  await expect(page.getByText('RESPONSE_PROCESSED · SUCCESS')).toBeVisible();
+  await expect(page.getByText(result.attemptId,{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'대시보드',exact:true}).filter({visible:true}).click();
+  await page.getByRole('button',{name:'현황 조회'}).click();
+  await expect(page.getByRole('heading',{name:'시간별 상태 건수 (UTC)'})).toBeVisible();
+  await expect(page.getByRole('cell',{name:'SUCCESS',exact:true}).first()).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});

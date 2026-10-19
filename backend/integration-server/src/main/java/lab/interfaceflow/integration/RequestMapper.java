@@ -15,7 +15,7 @@ public interface RequestMapper {
     int sending(@Param("id") String id,@Param("attemptId") String attemptId);
     int complete(@Param("id") String id,@Param("status") String status,@Param("httpStatus") Integer httpStatus,
         @Param("errorCode") String errorCode,@Param("response") String response,@Param("duration") long duration);
-    List<String> history(@Param("query") String query,@Param("status") String status,@Param("size") int size,@Param("offset") int offset);
-    long count(@Param("query") String query,@Param("status") String status);
+    List<String> history(@Param("query") String query,@Param("status") String status,@Param("size") int size,@Param("offset") int offset,@Param("from") java.time.Instant from,@Param("to") java.time.Instant to);
+    long count(@Param("query") String query,@Param("status") String status,@Param("from") java.time.Instant from,@Param("to") java.time.Instant to);
     String detail(String id);
 }

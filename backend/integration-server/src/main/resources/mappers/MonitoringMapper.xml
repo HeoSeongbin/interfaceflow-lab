@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="lab.interfaceflow.integration.MonitoringMapper">
+ <insert id="event">INSERT INTO integration.if_trace_event(request_key,attempt_id,stage,outcome)
+ SELECT id,COALESCE(CAST(#{attempt} AS uuid),CASE WHEN #{stage} IN ('RESPONSE_PROCESSED','REQUEST_COMPLETED') THEN attempt_id END),#{stage},#{outcome} FROM integration.if_request WHERE id=CAST(#{id} AS uuid)</insert>
+ <insert id="startAttempt">INSERT INTO integration.if_attempt(id,request_key,attempt_number,status)
+ VALUES(CAST(#{attempt} AS uuid),CAST(#{id} AS uuid),1,'SENDING')</insert>
+ <update id="finishAttempt">UPDATE integration.if_attempt a SET status=r.status,http_status=r.http_status,error_code=r.error_code,
+ completed_at=clock_timestamp(),duration_ms=greatest(0,floor(extract(epoch FROM (clock_timestamp()-a.started_at))*1000)::bigint)
+ FROM integration.if_request r WHERE r.id=CAST(#{id} AS uuid) AND a.id=r.attempt_id AND a.status='SENDING'</update>
+ <select id="trace" resultType="string">
+ SELECT jsonb_build_object('request',jsonb_build_object('id',r.id,'requestId',r.request_id,'interfaceId',r.interface_id,
+ 'traceId',r.trace_id,'status',r.status,'durationMs',r.duration_ms,'originalPayload',r.original_payload,'mappedPayload',r.mapped_payload,
+ 'response',r.response_payload,'errors',r.validation_errors,'processingStage',r.processing_stage),
+ 'events',COALESCE((SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM integration.if_trace_event e WHERE e.request_key=r.id),'[]'::jsonb),
+ 'attempts',COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.attempt_number) FROM integration.if_attempt a WHERE a.request_key=r.id),'[]'::jsonb))::text
+ FROM integration.if_request r WHERE r.trace_id=#{traceId} ORDER BY r.created_at,r.id LIMIT 101
+ </select>
+ <sql id="range">created_at &gt;= #{from} AND created_at &lt; #{to}</sql>
+ <select id="summary" resultType="string">
+ WITH filtered AS (SELECT * FROM integration.if_request WHERE <include refid="range"/>)
+ SELECT jsonb_build_object('total',count(*),'success',count(*) FILTER(WHERE status='SUCCESS'),
+ 'failed',count(*) FILTER(WHERE status IN ('FAILED','VALIDATION_FAILED','MAPPING_FAILED')),
+ 'unknown',count(*) FILTER(WHERE status='UNKNOWN'),
+ 'inProgress',count(*) FILTER(WHERE status IN ('VALIDATING','READY','SENDING')),
+ 'averageDurationMs',avg(duration_ms) FILTER(WHERE status IN ('SUCCESS','FAILED','UNKNOWN','VALIDATION_FAILED','MAPPING_FAILED')),
+ 'recentErrors',COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM
+ (SELECT id,request_id,interface_id,status,error_code,created_at FROM filtered WHERE error_code IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 10) e),'[]'::jsonb),
+ 'interfaces',COALESCE((SELECT jsonb_agg(to_jsonb(i) ORDER BY i.interface_id,i.status) FROM
+ (SELECT interface_id,status,count(*) AS count FROM filtered GROUP BY interface_id,status) i),'[]'::jsonb))::text
+ FROM filtered
+ </select>
+ <select id="statistics" resultType="string">
+ SELECT jsonb_build_object('hour',date_trunc('hour',created_at AT TIME ZONE 'UTC'),'status',status,'count',count(*))::text
+ FROM integration.if_request WHERE <include refid="range"/> GROUP BY date_trunc('hour',created_at AT TIME ZONE 'UTC'),status ORDER BY date_trunc('hour',created_at AT TIME ZONE 'UTC'),status
+ </select>
+</mapper>

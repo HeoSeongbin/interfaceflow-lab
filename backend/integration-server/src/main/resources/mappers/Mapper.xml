@@ -20,6 +20,8 @@
  </update>
  <sql id="filter">
   WHERE (#{query}='' OR position(lower(#{query}) in lower(request_id || ' ' || interface_id || ' ' || trace_id)) &gt; 0)
+  <if test="from != null">AND created_at &gt;= #{from}</if>
+  <if test="to != null">AND created_at &lt; #{to}</if>
   AND (#{status}='' OR status=#{status})
  </sql>
  <select id="history" resultType="string">

@@ -15,7 +15,9 @@ public class ReceiveController {
    @RequestHeader("X-Request-Id") String requestId,
    @RequestHeader("X-Attempt-Id") @Pattern(regexp="[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}") String attemptId){
    if(!request.requestId().equals(requestId)) throw new IllegalArgumentException("Request ID mismatch");
+   org.slf4j.LoggerFactory.getLogger(ReceiveController.class).info("TARGET_RECEIVED");
    mapper.insert(requestId,traceId,attemptId);
+   org.slf4j.LoggerFactory.getLogger(ReceiveController.class).info("TARGET_RESPONDED");
    return new TargetResponse("OK",requestId,traceId);
  }
 }

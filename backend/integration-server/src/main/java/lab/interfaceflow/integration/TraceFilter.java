@@ -15,6 +15,8 @@ public class TraceFilter extends OncePerRequestFilter {
   MDC.put("traceId",trace);res.setHeader("X-Trace-Id",trace);
   String requestId=req.getHeader("X-Request-Id");
   if(requestId!=null && requestId.matches("[A-Za-z0-9_-]{1,80}")) MDC.put("requestId",requestId);
+  String attemptId=req.getHeader("X-Attempt-Id");
+  if(attemptId!=null && attemptId.matches("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")) MDC.put("attemptId",attemptId);
   long start=System.nanoTime();
   try {
    if(req.getContentLengthLong()>65536){rejectOversize(res,trace);return;}

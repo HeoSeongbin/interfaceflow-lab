@@ -34,3 +34,14 @@
 ## Phase 3 이후
 
 PROJECT.md 18절의 12개 시나리오를 순서대로 자동화한다. 특히 timeout 후 target 처리 성공, 동일 키/다른 본문 충돌, 동시 중복 요청, 재시도 3번째 성공(Trace 동일/Attempt 상이), 처리 중 서버 종료 복구는 실제 DB/HTTP 기반으로 검증한다. 장애 API와 재시도는 현재 미구현이다.
+
+## Phase 3 검증 항목
+
+- 실제 PostgreSQL V3 migration과 정상 HTTP 전송의 8개 순서 이벤트/Attempt 1/식별자 일치/종료시간.
+- Source 실패: 접수·설정 조회·실패 이벤트만, HTTP/Attempt 없음.
+- 완료 요청의 잘못된 SENDING 전이 거절 후 추가 Attempt/이벤트 없음.
+- 공유 Trace의 복수 내부 UUID, 기간 시작 포함/종료 제외, DB 집계 상태 합계.
+- 잘못된 Trace/미존재/역전 기간 오류, 단위 테스트의 기본 24시간과 최대 31일.
+- 실제 Chrome desktop/mobile Trace 검색·시도 표시·대시보드 DB 통계와 화면 가로 넘침 검사.
+
+실제 실행 여부와 결과는 PROGRESS에 기록한다.

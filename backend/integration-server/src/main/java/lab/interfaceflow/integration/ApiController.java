@@ -18,6 +18,6 @@ public class ApiController {
     public TransmissionService.Preview preview(@PathVariable String id,@RequestBody PreviewInput request){return service.preview(id,request.payload());}
     @GetMapping("/api/requests")
     public RequestLifecycle.HistoryPage history(@RequestParam(defaultValue="") String query,@RequestParam(defaultValue="") String status,
-            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size){return lifecycle.history(query,status,page,size);}
+            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size,@RequestParam(required=false) java.time.Instant from,@RequestParam(required=false) java.time.Instant to){return lifecycle.history(query,status,page,size,from,to);}
     @GetMapping("/api/requests/{id}") public JsonNode detail(@PathVariable String id){return lifecycle.detail(id);}
 }

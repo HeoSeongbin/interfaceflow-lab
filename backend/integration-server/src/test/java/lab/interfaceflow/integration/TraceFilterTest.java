@@ -31,6 +31,16 @@ class TraceFilterTest {
         assertNull(MDC.get("traceId"));
     }
 
+    @Test void identifiersPropagateAndMdcClearsEvenOnFailure() throws Exception {
+        var request=new MockHttpServletRequest("GET","/api/requests");
+        String trace="0123456789abcdef0123456789abcdef",attempt=java.util.UUID.randomUUID().toString();
+        request.addHeader("X-Trace-Id",trace);request.addHeader("X-Request-Id","REQ-TRACE");request.addHeader("X-Attempt-Id",attempt);
+        assertThrows(jakarta.servlet.ServletException.class,()->new TraceFilter().doFilter(request,new MockHttpServletResponse(),(req,res)->{
+            assertEquals(trace,MDC.get("traceId"));assertEquals(attempt,MDC.get("attemptId"));assertEquals("REQ-TRACE",MDC.get("requestId"));
+            throw new jakarta.servlet.ServletException("test failure");
+        }));
+        assertNull(MDC.get("traceId"));assertNull(MDC.get("requestId"));assertNull(MDC.get("attemptId"));
+    }
     private MockHttpServletRequest requestWithUnknownLength(int bytes) {
         var request = new MockHttpServletRequest() {
             @Override public long getContentLengthLong() { return -1; }
