@@ -8,7 +8,13 @@
  VALUES(CAST(#{id} AS uuid),#{interfaceId},#{source},#{requestId},#{scope},#{hash},#{cipher},#{max},#{state})</insert>
  <select id="row" resultType="string">SELECT (<include refid="data"/>)::text FROM integration.if_delivery d JOIN integration.if_request r ON r.id=d.request_key WHERE d.request_key=CAST(#{id} AS uuid)</select>
  <select id="lock" resultType="string">SELECT (<include refid="data"/>)::text FROM integration.if_delivery d JOIN integration.if_request r ON r.id=d.request_key WHERE d.request_key=CAST(#{id} AS uuid) FOR UPDATE OF d</select>
- <select id="due" resultType="string">SELECT request_key::text FROM integration.if_delivery WHERE (state='WAIT' AND next_at &lt;= clock_timestamp()) OR (state='LEASED' AND lease_until &lt;= clock_timestamp()) ORDER BY next_at LIMIT 20</select>
+ <select id="due" resultType="string">
+ SELECT request_key::text FROM (
+  SELECT request_key,next_at AS due_at FROM integration.if_delivery WHERE state='WAIT' AND next_at &lt;= statement_timestamp()
+  UNION ALL
+  SELECT request_key,lease_until AS due_at FROM integration.if_delivery WHERE state='LEASED' AND lease_until &lt;= statement_timestamp()
+ ) due ORDER BY due_at,request_key LIMIT 20
+ </select>
  <select id="list" resultType="string">SELECT jsonb_build_object('id',d.request_key,'requestId',r.request_id,'traceId',r.trace_id,'interfaceId',r.interface_id,'status',r.status,'state',d.state,'attempts',d.attempts,'maxAttempts',d.max_attempts,'nextAt',d.next_at,'leaseUntil',d.lease_until,'errorCode',d.last_error,'canRetry',d.state IN ('DONE','DEAD_LETTER') AND d.retryable AND d.attempts &lt; 10)::text FROM integration.if_delivery d JOIN integration.if_request r ON r.id=d.request_key ORDER BY r.created_at DESC LIMIT 100</select>
  <update id="claim">UPDATE integration.if_delivery SET state='LEASED',attempts=attempts+1,lease_token=CAST(#{token} AS uuid),lease_until=clock_timestamp()+interval '60 seconds' WHERE request_key=CAST(#{id} AS uuid)</update>
  <update id="sending">UPDATE integration.if_request SET status='SENDING',attempt_id=CAST(#{attempt} AS uuid),processing_stage='REQUEST_DISPATCHED',updated_at=now() WHERE id=CAST(#{id} AS uuid) AND status IN ('READY','FAILED','UNKNOWN')</update>

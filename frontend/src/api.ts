@@ -18,12 +18,17 @@ export interface Definition {
   mappings: MappingRule[]; validations: ValidationRule[];
 }
 export interface SystemInfo { systemId: string; systemName: string; role: 'SOURCE'|'TARGET' }
+export class ApiError extends Error {
+  constructor(public status:number,public code:string,public traceId:string|undefined,description:string){
+    super(`${description} · ${code} · HTTP ${status}${traceId?` · Trace ${traceId}`:''}`);this.name='ApiError';
+  }
+}
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...options, headers: { 'Content-Type':'application/json', ...options?.headers } });
   const data = await readResponse(response);
   if (!response.ok) {
-    const error = data as {message?: string; code?: string};
-    throw new Error(`${error.message ?? error.code ?? '요청 오류'} · HTTP ${response.status}`);
+    const error = (data && typeof data==="object"?data:{}) as {message?: string; code?: string;traceId?:string};
+    throw new ApiError(response.status,error.code??"HTTP_ERROR",typeof error.traceId==="string"&&/^[a-f0-9]{32}$/.test(error.traceId)?error.traceId:undefined,error.message??"요청 오류");
   }
   return data as T;
 }

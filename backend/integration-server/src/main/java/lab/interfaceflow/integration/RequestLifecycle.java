@@ -11,6 +11,7 @@ import java.util.*;
 public class RequestLifecycle {
     public record Accepted(String id,Definition definition) {}
     public record HistoryPage(List<JsonNode> items,long total,int page,int size) {}
+    public record ScrollPage(List<JsonNode> items,String nextCursor) {}
     private final InterfaceService interfaces;
     private final RequestMapper mapper;
     private final PayloadRedactor redactor;
@@ -68,6 +69,16 @@ public class RequestLifecycle {
             throw new ApiProblem(400,"INVALID_FILTER","지원하지 않는 상태입니다.");
         if(from!=null && to!=null && !from.isBefore(to)) throw new ApiProblem(400,"INVALID_PERIOD","시작은 종료보다 이전이어야 합니다.");
         return new HistoryPage(mapper.history(query,status,size,page*size,from,to).stream().map(this::decode).toList(),mapper.count(query,status,from,to),page,size);
+    }
+    public ScrollPage scroll(String query,String status,int size,java.time.Instant from,java.time.Instant to,String cursor){
+        if(query.length()>160||size<1||size>100||(!status.isEmpty()&&!Set.of("VALIDATING","VALIDATION_FAILED","MAPPING_FAILED","READY","SENDING","SUCCESS","FAILED","UNKNOWN").contains(status))
+            ||(from!=null&&to!=null&&!from.isBefore(to)))throw new ApiProblem(400,"INVALID_FILTER","필터와 기간·페이지 크기를 확인하세요.");
+        String filter=lab.interfaceflow.common.CanonicalJson.hash(json.createArrayNode().add(query).add(status).add(from==null?"":from.toString()).add(to==null?"":to.toString()));
+        var position=cursor.isEmpty()?null:HistoryCursor.decode(cursor,filter);
+        var rows=mapper.scroll(query,status,size+1,from,to,position==null?null:position.createdAt(),position==null?null:position.id()).stream().map(this::decode).toList();
+        var items=rows.subList(0,Math.min(size,rows.size()));String next=null;
+        if(rows.size()>size){var last=items.get(items.size()-1);next=HistoryCursor.encode(java.time.Instant.parse(last.path("createdAt").asText()),last.path("id").asText(),filter);}
+        return new ScrollPage(items,next);
     }
     public JsonNode detail(String id) {
         if(!id.matches("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")) throw new ApiProblem(400,"INVALID_REQUEST_KEY","내부 UUID로 조회하세요.");

@@ -110,3 +110,7 @@ Source IF_DELIVERY는 역사 IF_REQUEST에 대한 별도 논리 고유키 등록
 Target IF_BUSINESS_RESULT는 출처/인터페이스/Request/namespace 고유키와 변환 전문 hash, OK 업무 결과를 가진다. 키별 advisory lock은 Target의 짧은 DB 처리만 직렬화하며 응답 지연 동안 해제된다. Target 업무 결과·수신 기록이 커밋된 뒤 응답이 손실돼도 후속 전송은 replay receipt만 추가한다. scope 없는 수동 장애 실험은 이 업무 테이블을 사용하지 않는다.
 
 DB 키·마스킹 진단·암호화 원본·Target 결과의 보관 범위는 다르다. 자동 삭제/키 회전은 미구현이며 기존 30일 수동 요청 삭제 SQL은 재처리/Source 고유키도 삭제한다. 적용 전에 양쪽 idempotency horizon과 키 백업 정책을 확인한다. 실행 상태와 마지막 결과 분리, 60초 lease, fencing, 재시도/수동 제한 및 실제 JVM 복구 검증 절차는 ADR-012/013과 scripts/Test-Recovery.mjs에 있다.
+
+## Phase 6 조회와 작업자
+
+History는 keyset metadata만 요청하며 선택 시 마스킹 상세를 별도로 읽는다. 시간/상태 복합 인덱스, 만료 lease 부분 인덱스와 WAIT/LEASED 분리 조회를 적용한다. HTTP 작업은 RETRY_CONCURRENCY(기본 2, 1~4) 고정 풀에서 실행하고 DB claim은 작업 실행 직전에 수행한다. 한 poll 최대 20건이며 전체 배치가 끝난 뒤 다음 poll을 수행한다. 다중 서버의 실제 소유권은 기존 DB lease/fencing이 결정한다. 최초 API 호출은 이 풀의 제한 대상이 아니다. 세 식별자와 불변 버전/보호 원본/UNKNOWN 정책을 유지한다. 측정 근거는 PERFORMANCE.md, 결정은 ADR-014를 따른다.

@@ -8,6 +8,9 @@ import java.util.List;
 
 @Mapper
 public interface RequestMapper {
+    List<String> scroll(@Param("query") String query,@Param("status") String status,@Param("size") int size,
+        @Param("from") java.time.Instant from,@Param("to") java.time.Instant to,
+        @Param("after") java.time.Instant after,@Param("afterId") String afterId);
     int simulation(@Param("id") String id,@Param("simulationId") String simulationId);
     void insert(@Param("id") String id,@Param("request") SendRequest request,@Param("traceId") String traceId,
         @Param("definition") Definition definition,@Param("original") String original);

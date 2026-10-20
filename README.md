@@ -2,7 +2,7 @@
 
 Java Spring Boot와 React로 구현하는 시스템 연동 검증·장애 시뮬레이션 포트폴리오입니다. 공개 가능한 가상 데이터만 사용합니다.
 
-현재 구현 범위는 **Phase 5 — 재시도 및 멱등성**입니다. DB 기반 인터페이스·설정 버전·필드 매핑·Source/Target 검증·변환 미리보기·마스킹된 전문 이력을 제공합니다. 두 독립 Spring Boot 서버는 실제 HTTP로 통신합니다. 요청별 장애 시나리오와 DB 기반 멱등성·암호화 재처리 원본·영속 재시도·lease 복구를 제공합니다.
+현재 구현 범위는 **Phase 6 — UI/UX 및 성능**입니다. DB 기반 인터페이스·설정 버전·필드 매핑·Source/Target 검증·변환 미리보기·마스킹된 전문 이력을 제공합니다. 두 독립 Spring Boot 서버는 실제 HTTP로 통신합니다. 요청별 장애 시나리오와 DB 기반 멱등성·암호화 재처리 원본·영속 재시도·lease 복구를 제공합니다.
 
 ```mermaid
 flowchart LR
@@ -100,7 +100,7 @@ mvn -B -s .mvn/settings.xml verify
 ./scripts/Test-Smoke.ps1 -BrowserTests
 ```
 
-스크립트는 두 JVM과 개발 프록시를 연결하여 데스크톱·모바일 너비의 Playwright 테스트 28건을 실행합니다. 정상 전송은 실제 HTTP와 PostgreSQL을 사용하며, 네트워크 중단·HTML 502 피드백만 별도 오류 주입으로 검사합니다. 각 전송은 테스트 이력을 남기므로 폐기 가능한 DB를 사용하세요. Edge는 `PLAYWRIGHT_CHANNEL=msedge`, Playwright Chromium은 `npx playwright install chromium` 후 `PLAYWRIGHT_CHANNEL=chromium`을 지정할 수 있습니다.
+스크립트는 두 JVM과 개발 프록시를 연결하여 데스크톱·모바일 너비의 Playwright 테스트 32건을 실행합니다. 정상 전송은 실제 HTTP와 PostgreSQL을 사용하며, 네트워크 중단·HTML 502 피드백만 별도 오류 주입으로 검사합니다. 각 전송은 테스트 이력을 남기므로 폐기 가능한 DB를 사용하세요. Edge는 `PLAYWRIGHT_CHANNEL=msedge`, Playwright Chromium은 `npx playwright install chromium` 후 `PLAYWRIGHT_CHANNEL=chromium`을 지정할 수 있습니다.
 
 이미 실행 중인 Compose 스택을 검사하려면 frontend 폴더에서 `E2E_BASE_URL=http://127.0.0.1:5173`, `E2E_DB_URL=postgresql://127.0.0.1:5432/interfaceflow`, 해당 DB_USER/DB_PASSWORD 환경 변수를 설정한 뒤 `npm run test:e2e`를 실행합니다. E2E_BASE_URL을 지정하지 않으면 Vite가 15173 포트에서 시작되며 `API_PROXY_TARGET`(기본 localhost:8080)을 사용합니다. 테스트용 DB 연결 변수는 브라우저 번들로 전달하지 않습니다.
 
@@ -172,3 +172,15 @@ node scripts/Test-Recovery.mjs
 
 
 검증 화면: [Retry Center](docs/screenshots/phase5-retry-center.png), [모바일 너비](docs/screenshots/phase5-retry-center-mobile.png). 좁은 화면의 표는 좌우로 스크롤할 수 있습니다.
+
+## Phase 6 콘솔과 조회
+
+Dashboard에서 실제 DB 집계를 KPI와 UTC 시간별 차트로 확인합니다. 기간을 적용하면 빈 시간도 0으로 표시하고 처리불확실(UNKNOWN)은 실패와 구분합니다. 좁은 화면의 차트·표는 키보드 초점 후 좌우 스크롤할 수 있습니다. 통계 표는 최근 표시 한도를 안내합니다.
+
+요청 이력은 검색·상태·기간을 적용하고 이전/다음 커서로 이동합니다. 상세의 JSON 비교는 마스킹된 변환 전후 leaf 경로를 표시하며 `∅`는 필드 부재입니다. 암호화된 재처리 원문은 공개하지 않습니다. 비교 한도 초과는 화면에 표시됩니다. 키보드 첫 Tab의 본문 이동, 명시적 상태 텍스트, 라이트/다크 테마를 지원합니다.
+
+background retry는 `RETRY_CONCURRENCY=2`가 기본이며 1~4만 허용합니다. 직접 실행은 Integration 터미널의 환경 변수, Compose는 .env로 설정합니다. 최대 20건 배치를 처리하며 최초 API 전송의 동시성 제한은 아닙니다. 기존 lease/fencing·Request/Trace 유지·새 Attempt 정책을 따릅니다.
+
+10만 가상 행 SQL 비교와 재현 명령, 측정 한계는 [성능 기록](docs/PERFORMANCE.md)에 있습니다. 검증 결과와 Phase 7의 Docker/Testcontainers/CI 잔여 작업은 [진행 상태](docs/PROGRESS.md)를 확인하세요.
+
+검증 화면: [대시보드](docs/screenshots/phase6-dashboard-desktop.png), [모바일 차트](docs/screenshots/phase6-dashboard-mobile.png), [전문 비교](docs/screenshots/phase6-history-desktop.png), [모바일 이력](docs/screenshots/phase6-history-mobile.png).

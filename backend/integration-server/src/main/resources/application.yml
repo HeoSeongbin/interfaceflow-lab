@@ -32,3 +32,4 @@ lab:
   connection-failure-url: ${CONNECTION_FAILURE_URL:http://127.0.0.1:1}
   replay-key: ${REPLAY_KEY:}
   retry-worker: ${RETRY_WORKER:true}
+  retry-concurrency: ${RETRY_CONCURRENCY:2}

@@ -32,6 +32,14 @@
   <include refid="filter"/> ORDER BY created_at DESC,id DESC LIMIT #{size} OFFSET #{offset}
  </select>
  <select id="count" resultType="long">SELECT count(*) FROM integration.if_request <include refid="filter"/></select>
+ <select id="scroll" resultType="string">
+  SELECT jsonb_build_object('id',id,'requestId',request_id,'interfaceId',interface_id,'traceId',trace_id,'attemptId',attempt_id,
+   'status',status,'interfaceVersion',interface_version,'processingStage',processing_stage,'errorCode',error_code,
+   'httpStatus',http_status,'durationMs',duration_ms,'createdAt',created_at)::text FROM integration.if_request
+  <include refid="filter"/>
+  <if test="after != null">AND (created_at,id) &lt; (#{after},CAST(#{afterId} AS uuid))</if>
+  ORDER BY created_at DESC,id DESC LIMIT #{size}
+ </select>
  <select id="detail" resultType="string">
   SELECT jsonb_build_object('id',r.id,'requestId',r.request_id,'interfaceId',r.interface_id,'traceId',r.trace_id,'attemptId',r.attempt_id,
    'status',r.status,'simulationId',r.simulation_id,'interfaceVersion',r.interface_version,'processingStage',r.processing_stage,'errorCode',r.error_code,

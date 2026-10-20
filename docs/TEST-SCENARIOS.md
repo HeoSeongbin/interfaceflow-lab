@@ -66,3 +66,11 @@ PROJECT.md 18절의 12개 시나리오를 순서대로 자동화한다. 특히 t
 - `node scripts/Test-Recovery.mjs`: Target 업무 커밋 직후 Integration JVM 강제 종료, 재시작·실제 60초 lease 만료 후 성공, Attempt UNKNOWN→SUCCESS, 같은 Trace와 업무 결과 한 건을 실제 DB로 확인. 자신이 만든 JVM만 종료.
 
 Docker/Testcontainers/원격 CI 실행 여부는 PROGRESS와 구분한다. DB lease 시간을 앞당기는 통합 테스트와 실제 프로세스 재시작 검증은 별도 근거다.
+
+## Phase 6 회귀 검증
+
+- 커서: 동일 timestamp 12건을 5건씩 조회, 중복/누락 없음, 조회 중 최신 삽입의 페이지 이동 없음. 잘못된 커서·필터 변경·size 초과 400.
+- 실제 DB due: 만료 lease 포함/유효 lease 제외, claim과 완료 후 정리. 제한 풀은 latch로 peak 2/모든 작업 완료와 설정 0/5 거절 검증.
+- JSON 비교: 부재/null/false/0/타입/객체 순서/배열/JSON Pointer escape/절단. UTC 차트의 빈 시간/반개구간/최대 기간 검증. API 오류의 HTTP/code/Trace 보존 검증.
+- Chrome: 실제 12건 전송 후 커서 앞뒤 이동·마스킹 비교, 키보드 본문 이동·실제 차트·라이트 테마·모바일 페이지 overflow 검증. 기존 HTTP/DB/재시도/복구 회귀 유지.
+- SQL 성능 재현과 해석 범위: PERFORMANCE.md. Docker/Testcontainers/원격 CI는 실행 전까지 미검증으로 둔다.

@@ -111,3 +111,13 @@ Source 작업자는 매 dispatch 전 /api/capabilities의 interfaceflow-v1 프�
 수동 retry는 DONE/DEAD_LETTER의 재시도 가능한 오류만, 원본 복호화 확인 후, 동일 행 잠금으로 WAIT를 한 번 예약한다(동시 호출 하나만 성공). 자동 소진 후 한 번씩 추가 허용하되 절대 총 10회다. 성공/영구 오류/검증 오류/실행 중/대기 중/기존 원본 없는 이력은 거절한다. 원본 키 장애나 프로토콜 미확인은 자동 전송 없이 DEAD_LETTER에 두고 운영 조치 후 수동 예약한다. 설정/원본 편집 재처리는 없고 수정 전문은 새 Request ID로 접수한다.
 
 보관: 현재 자동 삭제는 없으며 idempotency 기록과 보호 키 보관 범위 내에서 보장한다. 기존 수동 요청 정리 SQL은 IF_DELIVERY도 FK cascade로 제거하므로 실행 전에 키/재처리 보관 정책을 확인해야 한다. Target 업무 결과를 임의 삭제하면 중복 방지 보장도 사라진다. 관련 코드: DeliveryStore/Mapper, ReliableDelivery, ReplayCipher, RetryController, BusinessService/Mapper, Test-Recovery.mjs.
+
+## ADR-014 · 2026-10-20 · 커서 이력·조회 인덱스와 제한된 재시도 병렬성
+
+이력 UI는 COUNT/OFFSET 대신 `(created_at DESC, id DESC)` 키셋으로 size+1개를 조회한다. 기존 페이지 API는 호환성을 위해 유지한다. 커서는 DB timestamp의 마이크로초와 UUID를 보존하고 검색·상태·기간의 canonical hash에 묶는다. hash는 필터 혼용 방지이며 서명/접근 제어가 아니다. 페이지 사이 snapshot을 고정하지 않으므로 상태 변경은 반영될 수 있고 최신 행은 새 조회로 확인한다. 부분 문자열 검색의 광범위 스캔은 여전히 가능하다.
+
+V6에서 시간/상태 복합 정렬 인덱스와 due 후보 인덱스를 추가했다. 실제 EXPLAIN 결과 WAIT 부분 인덱스가 기존 state/next_at 인덱스와 겹쳤으므로 V7에서 제거했다. 기존 시간 단독 인덱스 두 개도 복합 인덱스의 접두 열로 대체한다. 만료 lease 부분 인덱스는 유지한다. due 조회는 서로 배타적인 WAIT/LEASED를 UNION ALL로 분리하고 statement_timestamp()로 인덱스 범위 조회한다. 최종 claim/완료는 기존 실시간 만료 검사와 fencing을 유지한다. SQL 측정 방법·숫자·한계는 PERFORMANCE.md에 기록한다.
+
+작업자는 한 poll 최대 20건을 고정 풀로 실행하며 RETRY_CONCURRENCY 기본 2, 허용 1~4다. 각 작업이 실제 실행될 때 claim하므로 풀 대기 시간에 lease를 소모하지 않는다. invokeAll로 배치 종료를 기다려 같은 프로세스의 poll이 겹치지 않는다. 종료 시 풀을 중단하며 중단된 실행은 기존 만료 복구 정책을 따른다. 이 설정은 background retry 작업자만 제한하며 최초 API 전송이나 다중 인스턴스 전체 동시성을 제한하지 않는다. HTTP를 DB 트랜잭션에 넣지 않는다.
+
+콘솔 비교는 공개된 마스킹 snapshot만 사용하며 JSON Pointer leaf 단위로 부재/타입/값을 비교한다. 비교는 500개 차이·탐색 예산·깊이 제한으로 중단하고 절단 사실을 표시한다. 시간별 차트는 실제 DB 집계를 UTC로 빈 시간까지 채우고 UNKNOWN을 실패와 별도 표시한다. 키보드 skip link/초점/스크롤 영역, 명시적 상태 텍스트와 라이트·다크 테마를 유지한다. 전체 접근성 인증이나 운영 부하 SLA를 주장하지 않는다.

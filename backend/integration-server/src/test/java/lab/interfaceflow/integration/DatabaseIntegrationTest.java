@@ -309,4 +309,33 @@ class DatabaseIntegrationTest {
   }finally{protection=true;}
  }
 
+ @Test void cursorHistoryHandlesTiesAndDoesNotShiftWhenNewRowsArrive(){
+  var d=create(configuration());String interfaceId=d.path("interfaceId").asText();
+  for(int i=0;i<12;i++)send(interfaceId,payload());
+  jdbc.update("UPDATE integration.if_request SET created_at=TIMESTAMPTZ '2020-01-01T00:00:00Z' WHERE interface_id=?",interfaceId);
+  var seen=new java.util.HashSet<String>();String cursor="";int pages=0;
+  do{
+   var response=http.getForEntity("/api/requests/scroll?query="+interfaceId+"&size=5&cursor="+cursor,com.fasterxml.jackson.databind.JsonNode.class);
+   assertEquals(200,response.getStatusCode().value());var page=response.getBody();
+   assertFalse(page.has("total"));for(var row:page.path("items"))assertTrue(seen.add(row.path("id").asText()));
+   cursor=page.path("nextCursor").isNull()?"":page.path("nextCursor").asText();
+   if(pages++==0){
+    send(interfaceId,payload());
+    assertEquals(400,http.getForEntity("/api/requests/scroll?query=OTHER&cursor="+cursor,String.class).getStatusCode().value());
+   }
+  }while(!cursor.isEmpty()&&pages<5);
+  assertEquals(12,seen.size());assertEquals(3,pages);
+  assertEquals(400,http.getForEntity("/api/requests/scroll?cursor=bad!",String.class).getStatusCode().value());
+  assertEquals(400,http.getForEntity("/api/requests/scroll?size=101",String.class).getStatusCode().value());
+ }
+ @Test void dueSelectionIncludesExpiredLeasesAndExcludesTerminalAndFutureWork(){
+  var d=create(configuration().put("retryMaxAttempts",3));String interfaceId=d.path("interfaceId").asText();
+  var first=durable.register(new lab.interfaceflow.common.Contracts.SendRequest(interfaceId,"DUE-A-"+UUID.randomUUID(),payload()),UUID.randomUUID().toString().replace("-",""),null);
+  var second=durable.register(new lab.interfaceflow.common.Contracts.SendRequest(interfaceId,"DUE-B-"+UUID.randomUUID(),payload()),UUID.randomUUID().toString().replace("-",""),null);
+  jdbc.update("UPDATE integration.if_delivery SET lease_until=now()-interval '1 second' WHERE request_key=CAST(? AS uuid)",first.id());
+  assertTrue(durable.due().contains(first.id()));assertFalse(durable.due().contains(second.id()));
+  var recovered=durable.claim(first.id());assertNotNull(recovered);durable.complete(recovered,"SUCCESS",200,null,null,0);
+  durable.complete(second.claim(),"SUCCESS",200,null,null,0);assertFalse(durable.due().contains(first.id()));
+ }
+
 }

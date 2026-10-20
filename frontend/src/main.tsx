@@ -60,12 +60,12 @@ function App() {
   useEffect(()=>{void refresh().catch(()=>{});},[]);
   function navigate(next:Tab){setTab(next);if(next==='sender')void refresh().catch(()=>{});}
   const navigation=tabs.map(t=><button key={t.id} aria-current={tab===t.id?'page':undefined} className={tab===t.id?'selected':''} onClick={()=>navigate(t.id)}>{t.label}</button>);
-  return <div className={dark?'app dark':'app'}><aside><div className="brand">⇄ InterfaceFlow<span>LAB / DEVELOPMENT</span></div><nav>{navigation}<p>Phase 5 · 재시도 및 멱등성</p></nav><small>LOCAL ENVIRONMENT<br/>가상 데이터 전용</small></aside><main>
+  return <div className={dark?'app dark':'app'}><a className="skip-link" href="#workspace">본문으로 이동</a><aside><div className="brand">⇄ InterfaceFlow<span>LAB / DEVELOPMENT</span></div><nav aria-label="주 메뉴">{navigation}<p>Phase 6 · 관측성과 사용성</p></nav><small>LOCAL ENVIRONMENT<br/>가상 데이터 전용</small></aside><main id="workspace" tabIndex={-1}>
     <header><span>워크스페이스 / {tabs.find(t=>t.id===tab)?.label}</span><button onClick={()=>setDark(!dark)}>{dark?'라이트 모드':'다크 모드'}</button></header>
-    <nav className="mobile-nav">{navigation}</nav>
+    <nav className="mobile-nav" aria-label="모바일 메뉴">{navigation}</nav>
     {error&&<p className="error" role="alert">설정 조회 실패: {error} <button onClick={()=>void refresh().catch(()=>{})}>다시 조회</button></p>}
     {tab==='retry'?<RetryCenter/>:tab==='simulation'?<SimulationLab interfaces={interfaces}/>:tab==='sender'?<Sender interfaces={interfaces}/>:tab==='interfaces'?<InterfaceManagement interfaces={interfaces} systems={systems} refresh={refresh}/>:tab==='trace'?<TraceExplorer/>:tab==='dashboard'?<Dashboard/>:<History/>}
-    <footer>Phase 5: 멱등성·암호화 원본·재시도·lease 복구. 민감 필드는 마스킹됩니다. 일반 전송은 같은 요청 키의 중복 실행을 방지합니다.</footer>
+    <footer>Phase 6: 커서 이력·전문 비교·시간별 차트·접근성. 민감 필드는 마스킹됩니다. 일반 전송은 같은 요청 키의 중복 실행을 방지합니다.</footer>
   </main></div>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

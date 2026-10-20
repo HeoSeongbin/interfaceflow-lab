@@ -23,4 +23,8 @@ public class ApiController {
     public RequestLifecycle.HistoryPage history(@RequestParam(defaultValue="") String query,@RequestParam(defaultValue="") String status,
             @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size,@RequestParam(required=false) java.time.Instant from,@RequestParam(required=false) java.time.Instant to){return lifecycle.history(query,status,page,size,from,to);}
     @GetMapping("/api/requests/{id}") public JsonNode detail(@PathVariable String id){return lifecycle.detail(id);}
+    @GetMapping("/api/requests/scroll")
+    public RequestLifecycle.ScrollPage scroll(@RequestParam(defaultValue="") String query,@RequestParam(defaultValue="") String status,
+        @RequestParam(defaultValue="20") int size,@RequestParam(required=false) java.time.Instant from,@RequestParam(required=false) java.time.Instant to,
+        @RequestParam(defaultValue="") String cursor){return lifecycle.scroll(query,status,size,from,to,cursor);}
 }

@@ -295,3 +295,31 @@ test('retry center manually queues one additional attempt after automatic budget
  await expect(row).toContainText(first.traceId);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.screenshot({path:testInfo.outputPath('retry-center.png'),fullPage:true});
 });
+
+test('cursor history pages masked comparisons without duplicate rows',async({page},testInfo)=>{
+ const sample=await (await page.request.get('/api/interfaces/IF-USER-001')).json();
+ const id=`IF-P6-${crypto.randomUUID()}`;
+ expect((await page.request.post('/api/interfaces',{data:{...sample,interfaceId:id,interfaceName:'Cursor diagnostics',version:0}})).status()).toBe(201);
+ const ids:string[]=[];
+ for(let i=0;i<12;i++){const requestId=`P6-${crypto.randomUUID()}`;ids.push(requestId);const response=await page.request.post('/api/requests',{data:{interfaceId:id,requestId,payload:{userId:'P6001',userName:'가상 사용자',email:'private@example.com'}}});expect(response.status()).toBe(200);}
+ await page.getByRole('button',{name:'전송 이력',exact:true}).filter({visible:true}).click();
+ await page.getByLabel('이력 검색').fill(id);await page.getByRole('button',{name:'검색 / 새로고침'}).click();
+ await expect(page.getByText('1 페이지 · 현재 10건')).toBeVisible();
+ await page.getByRole('button',{name:'다음',exact:true}).click();await expect(page.getByText('2 페이지 · 현재 2건')).toBeVisible();await expect(page.getByRole('button',{name:'다음',exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:ids[0],exact:true}).click();await expect(page.getByRole('heading',{name:'변환 전후 비교'})).toBeVisible();
+ await expect(page.getByText('/employee_id',{exact:true})).toBeVisible();await expect(page.getByText('∅ 필드 없음',{exact:true}).first()).toBeVisible();
+ await expect(page.locator('main')).not.toContainText('private@example.com');
+ await page.screenshot({path:testInfo.outputPath('phase6-history.png'),fullPage:true});
+ await page.getByRole('button',{name:'이전',exact:true}).click();await expect(page.getByText('1 페이지 · 현재 10건')).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('dashboard chart and keyboard skip navigation expose accessible diagnostics',async({page},testInfo)=>{
+ await page.keyboard.press('Tab');await expect(page.getByRole('link',{name:'본문으로 이동'})).toBeFocused();
+ await page.keyboard.press('Enter');await expect(page.getByRole('main')).toBeFocused();
+ await page.getByRole('button',{name:'대시보드',exact:true}).filter({visible:true}).click();await page.getByRole('button',{name:'현황 조회'}).click();
+ await expect(page.getByRole('img',{name:'시간별 처리량',exact:true})).toBeVisible();await expect(page.getByText('처리불확실',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'라이트 모드'}).click();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:testInfo.outputPath('phase6-dashboard.png'),fullPage:true});
+});

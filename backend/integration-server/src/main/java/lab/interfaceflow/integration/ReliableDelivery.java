@@ -18,11 +18,18 @@ public class ReliableDelivery {
  private final DeliveryStore store;private final PayloadEngine engine;private final ObjectMapper json;
  private final String target,failure;private final HttpClient client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
  private final boolean scheduling;
+ private final RetryBatch batch;
  public ReliableDelivery(DeliveryStore store,PayloadEngine engine,ObjectMapper json,@Value("${lab.target-url}") String target,
-  @Value("${lab.connection-failure-url:http://127.0.0.1:1}") String failure,@Value("${lab.retry-worker:true}") boolean scheduling){this.store=store;this.engine=engine;this.json=json;this.target=target;this.failure=failure;this.scheduling=scheduling;}
+  @Value("${lab.connection-failure-url:http://127.0.0.1:1}") String failure,@Value("${lab.retry-worker:true}") boolean scheduling,
+  @Value("${lab.retry-concurrency:2}") int concurrency){this.store=store;this.engine=engine;this.json=json;this.target=target;this.failure=failure;this.scheduling=scheduling;batch=new RetryBatch(concurrency);}
  public SendResult send(SendRequest request,String trace,Scenario scenario){var registration=store.register(request,trace,scenario);if(registration.claim()!=null)dispatch(registration.claim());return store.result(registration.id());}
  @Scheduled(fixedDelayString="${lab.retry-poll-ms:1000}")
- public void poll(){if(!scheduling)return;for(String id:store.due())try{run(id);}catch(Exception e){org.slf4j.LoggerFactory.getLogger(getClass()).warn("Delivery worker deferred an unfinished request");}}
+ public void poll(){
+  if(!scheduling)return;
+  var jobs=store.due().stream().<Runnable>map(id->()->{try{run(id);}catch(Exception e){org.slf4j.LoggerFactory.getLogger(getClass()).warn("Delivery worker deferred an unfinished request");}}).toList();
+  try{batch.execute(jobs);}catch(InterruptedException e){Thread.currentThread().interrupt();}
+ }
+ @jakarta.annotation.PreDestroy public void stop(){batch.close();}
  public void run(String id){
   var claim=store.claim(id);if(claim!=null)dispatch(claim);
  }

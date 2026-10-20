@@ -140,3 +140,9 @@ Target 수신은 시나리오별 최대 20회이며 scope/만료/한도 초과 �
 retryMaxAttempts는 최초 포함 총 자동 Attempt 수(1~5). 500ms 지수 backoff, 최대 30초, 50~100% jitter. 408/429/5xx/통신/응답 계약 오류를 대상으로 하고 400/409/검증·매핑 실패는 재시도하지 않는다. 요청 상태 UNKNOWN을 확정 실패로 바꾸지 않고 큐의 소진 상태와 분리한다. 진단 이벤트의 REQUEST_COMPLETED는 기존 단일 처리 흐름 종료 의미이며 후속 RETRY_SCHEDULED/DEAD_LETTER 및 Retry Center 실행 상태를 함께 확인한다.
 
 REPLAY_KEY는 고정된 base64 32-byte 환경 변수다. 신규 일반/신뢰성 전송은 키 누락 시 503이며 트랜잭션을 롤백한다. 원본은 AES-GCM으로 저장되고 상세/Trace에는 기존 마스킹 snapshot만 제공한다. 암호화 키를 잃으면 원본을 재구성할 수 없다. 재시작은 키와 DB를 유지해야 한다. lease는 60초이며 만료 전에는 다른 작업자가 실행하지 않고, 만료 후 이전 Attempt UNKNOWN + 새 Attempt로 복구한다. 전송 예산/절대 10회 한도를 소진하면 자동 실행하지 않는다. 구체적 불확실성·보관 한계는 ADR-012/013을 따른다.
+
+## Phase 6 이력 스크롤 계약
+
+`GET /api/requests/scroll?query=&status=&from=&to=&size=20&cursor=`는 `{items: [...], nextCursor: string|null}`을 반환한다. query는 최대 160자 부분 문자열, size는 1~100이며 기간은 기존 API와 동일하게 UTC from 포함/to 제외다. 기본 정렬은 created_at DESC, id DESC다. items는 전문을 제외한 기존 이력 metadata다. 다음 호출은 동일 필터와 반환된 cursor를 사용한다. 커서가 잘못되었거나 필터가 바뀌면 400 INVALID_CURSOR이며 처음부터 다시 조회한다. 프런트는 이전 커서를 보관하여 이전 페이지로 이동한다.
+
+커서는 snapshot이나 인증 토큰이 아니다. 조회 중 새 최신 행은 후속 페이지를 밀어내지 않지만 상태 변경/삭제까지 고정하지 않는다. 기존 `GET /api/requests` 페이지 API는 유지한다. 세부 진단 값은 기존 상세 API로만 조회하고 마스킹/암호화 경계를 유지한다.

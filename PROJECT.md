@@ -1471,3 +1471,7 @@ Phase 2 이후의 고급 기능을 먼저 구현하지 않는다.
 ## 27. 현재 구현 범위 — 2026-10-19 Phase 5
 
 일반 전송에 Source 복합 고유키/canonical hash, AES-GCM 재처리 원본, Target 업무 결과 고유키/재사용, DB 영속 backoff/jitter·수동 재처리·lease 만료 복구·fencing, Retry Center를 추가했다. 요청/Trace/불변 설정은 유지하고 Attempt를 추가한다. 기존 수동 시나리오 execute는 독립 실험으로 유지하며 reliable-execute 경로로 재시도/멱등성을 검증한다. 현재 가상 업무 결과 모델과 키/이력 보관 범위의 보장이고 exactly-once 전달을 주장하지 않는다. 인증·자동 키 회전/보관 삭제·대량 작업자 용량 최적화·Docker 검증은 미완료다. 실제 결과와 범위는 PROGRESS/API/ADR-012/013을 따른다.
+
+## 28. 현재 구현 범위 — 2026-10-20 Phase 6
+
+콘솔 KPI/실제 UTC 시간별 차트·기간 필터, 마스킹 JSON 비교, 상태 배지·Attempt 표, 키보드 접근/반응형 스크롤·다크모드, 오류 metadata 표시를 개선했다. 이력 UI에 필터 결합 커서 조회를 적용하고 기존 페이지 API를 유지한다. V6/V7 인덱스 검토·만료 작업 조회 개선과 제한된 background 병렬 처리(기본 2, 1~4)를 추가했다. SQL 측정은 가상 10만 행의 로컬 단일 실행이며 전체 시스템 SLA나 인증된 접근성을 뜻하지 않는다. 실검증 결과와 제약은 PROGRESS/PERFORMANCE/ADR-014를 따른다. Phase 7 통합 환경 검증은 별도 단계다.
