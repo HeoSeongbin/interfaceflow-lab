@@ -1,46 +1,60 @@
 # InterfaceFlow Lab
 
-Java Spring Boot와 React로 구현하는 시스템 연동 검증·장애 시뮬레이션 포트폴리오입니다. 공개 가능한 가상 데이터만 사용합니다.
+두 독립 Spring Boot 서버의 실제 HTTP 통신으로 전문 검증·매핑·장애·재시도·중복 처리·복구를 재현하고 추적하는 개발용 플랫폼입니다. 가상 데이터만 사용합니다.
 
-현재 구현 범위는 **Phase 6 — UI/UX 및 성능**입니다. DB 기반 인터페이스·설정 버전·필드 매핑·Source/Target 검증·변환 미리보기·마스킹된 전문 이력을 제공합니다. 두 독립 Spring Boot 서버는 실제 HTTP로 통신합니다. 요청별 장애 시나리오와 DB 기반 멱등성·암호화 재처리 원본·영속 재시도·lease 복구를 제공합니다.
+현재 **Phase 7 — 통합 검증**을 진행했습니다. 로컬 Testcontainers와 전체 Compose 스택 검증 결과는 [PROGRESS](docs/PROGRESS.md)에 기록합니다. GitHub Actions는 구성했으며 원격 실행은 별도 미검증입니다.
 
 ```mermaid
 flowchart LR
-    UI[React :5173] --> API[Integration :8080]
-    API -->|실제 HTTP JSON| TARGET[Target :8081]
-    API --> DB[(PostgreSQL :5432)]
-    TARGET --> DB
+    UI[React Console :5173] --> N[Nginx /api proxy]
+    N --> API[Integration :8080]
+    API -->|실제 HTTP + 세 식별자| TARGET[Target :8081]
+    API --> I[(PostgreSQL integration)]
+    TARGET --> T[(PostgreSQL target)]
 ```
 
-기술: Java 21, Spring Boot 3.5.7, MyBatis 3.0.5 XML Mapper, Flyway, PostgreSQL 17, RestClient/JDK HttpClient, Actuator, springdoc OpenAPI, React 19.2, TypeScript 5.9, Vite 7.1, Vitest. 선택 근거는 [ADR](docs/DECISIONS.md)에 기록합니다.
+Java 21 / Spring Boot 3.5.7 / MyBatis XML 3.0.5 / PostgreSQL 17 / Flyway / React 19.2 / TypeScript 5.9 / Vite 7.1.12를 사용합니다. 설계 이유와 범위는 [ADR](docs/DECISIONS.md), 실제 DB 모델과 복구 흐름은 [아키텍처](docs/ARCHITECTURE.md), 전체 요구사항은 [PROJECT](PROJECT.md)를 참고하세요. PROJECT의 전체 요구사항이 구현 완료 목록은 아닙니다.
 
-## Docker 로컬 실행
+## 빠른 실행 · Docker Compose
 
-Docker Engine/Desktop과 Compose v2가 필요합니다. 저장소 루트에서:
+Docker Desktop/Engine을 실행하고 Compose v2 이상을 준비합니다. 아래는 PowerShell 예시입니다. 기존 .env가 있다면 보존하고 값을 확인합니다.
 
 ```powershell
 Copy-Item .env.example .env
-# .env의 DB_PASSWORD를 로컬 개발용 값으로 변경
-# 재시작 사이에 보존할 32-byte 암호화 키 생성 (실제 .env는 커밋하지 않음)
+# .env의 DB_PASSWORD를 로컬용 값으로 변경
+# 한 번 생성한 키는 DB와 함께 보존. 실제 .env는 커밋하지 않음.
 $replayKey = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 (Get-Content .env -Raw).Replace('replace-with-a-generated-base64-key', $replayKey) | Set-Content .env
+docker compose config --quiet
 docker compose up --build -d
+docker compose ps
 docker compose logs -f integration target
 ```
 
-콘솔: http://localhost:5173 · Integration health: http://localhost:8080/actuator/health · Target health: http://localhost:8081/actuator/health. 서비스 시작 직후 DB migration이 끝날 때까지 잠시 기다리세요. `docker compose down`으로 종료하며 DB volume은 유지됩니다.
+DB 마이그레이션과 애플리케이션 시작이 끝난 뒤 다음 주소를 확인합니다.
+
+| 용도 | 기본 주소 |
+| --- | --- |
+| 콘솔 | http://localhost:5173 |
+| Integration health | http://localhost:8080/actuator/health |
+| Target health | http://localhost:8081/actuator/health |
+| Integration OpenAPI | http://localhost:8080/swagger-ui/index.html |
+| Target OpenAPI | http://localhost:8081/swagger-ui/index.html |
+
+두 health의 status가 UP이면 콘솔에서 IF-USER-001 샘플을 전송합니다. `docker compose down`은 DB volume을 유지합니다. 포트 충돌 시 .env의 FRONTEND_PORT/INTEGRATION_PORT/TARGET_PORT/DB_PORT를 바꾸세요. 기본은 5173/8080/8081/5432이며 컨테이너 사이 주소는 유지됩니다. 포트에 맞게 위 URL도 바꿉니다.
 
 ## 개별 개발 실행
 
-Java 21, Maven 3.9+, Node 22.12+, PostgreSQL이 필요합니다. Docker DB만 띄우려면 `.env` 설정 후 `docker compose up -d db`를 실행합니다.
+Java 21, Maven 3.9+, Node 22.12+, PostgreSQL 17이 필요합니다. `.env` 설정 후 `docker compose up -d db`로 DB만 시작할 수도 있습니다. 각 Java 터미널에서 동일 DB 설정을 사용하고 Integration은 같은 REPLAY_KEY를 유지합니다.
 
 ```powershell
+$env:DB_URL='jdbc:postgresql://localhost:5432/interfaceflow'
+$env:DB_USER='interfaceflow'
 $env:DB_PASSWORD='로컬 설정 값'
-# Integration을 실행할 각 터미널에서 같은 .env 키 사용
 $env:REPLAY_KEY=(Get-Content .env | Where-Object { $_ -match '^REPLAY_KEY=' }) -replace '^REPLAY_KEY=', ''
 mvn -B -s .mvn/settings.xml clean verify
 java -jar backend/target-simulator/target/target-simulator-0.1.0-SNAPSHOT.jar
-# 별도 터미널 (같은 DB_PASSWORD와 REPLAY_KEY 환경 변수 지정)
+# 같은 DB 환경 변수를 설정한 별도 터미널
 java -jar backend/integration-server/target/integration-server-0.1.0-SNAPSHOT.jar
 # 별도 터미널
 cd frontend
@@ -48,139 +62,57 @@ npm ci
 npm run dev
 ```
 
-DB_URL 기본값은 `jdbc:postgresql://localhost:5432/interfaceflow`, DB_USER는 `interfaceflow`. Integration의 TARGET_URL 기본값은 `http://localhost:8081`, TARGET_TIMEOUT_MS는 3000입니다. Vite 개발 서버가 /api를 Integration에 프록시하므로 별도 CORS 허용이 필요하지 않습니다.
+Integration TARGET_URL 기본은 http://localhost:8081, Vite API_PROXY_TARGET 기본은 http://localhost:8080입니다. DB host port를 바꿨다면 DB_URL을 수정합니다. `RETRY_CONCURRENCY`는 background 작업자 수(기본 2, 허용 1~4)이며 최초 API 전송의 전체 동시성 제한은 아닙니다. 개발 프록시와 Nginx 모두 same-origin /api를 사용합니다.
 
-## 화면과 테스트 요청
+## 콘솔에서 확인할 기능
 
-전문 전송 화면에서 IF-USER-001을 선택하고 샘플 JSON을 불러옵니다. **변환 미리보기**는 Source 검사 → 필드 매핑 → Target 검사를 실행하며 HTTP나 이력을 만들지 않습니다. **전문 전송**은 같은 검증을 거쳐 실제 Target으로 전송하고 결과·설정 버전·마스킹된 전후 JSON을 저장합니다.
+- **전문 전송:** Source 검증 → 필드 매핑 → Target 검증 → 실제 HTTP. 미리보기는 HTTP/이력을 만들지 않습니다. userId/userName 필수 문자열을 employee_id/employee_name으로 매핑하며 선택 email은 진단 이력에서 마스킹됩니다.
+- **인터페이스 관리:** CRUD·비활성화·버전, Source 등록/Target 허용 목록, 규칙 편집. 수정은 현재 version을 요구하고 충돌은 409입니다. 요청은 최초 불변 버전을 사용합니다.
+- **전송 이력:** 검색·상태·기간·이전/다음 커서, 내부 UUID 상세, 마스킹된 변환 전후 JSON Pointer leaf 비교. ∅는 필드 부재이며 비교 한도 초과는 안내합니다. 커서는 페이지 간 snapshot이 아니므로 상태 변경은 반영될 수 있습니다.
+- **Trace Explorer:** 같은 Trace의 요청·단계별 이벤트·개별 Attempt를 조회합니다. Target 내부 단계는 구조화 로그에 있으며 Explorer에 중앙 수집하지 않습니다.
+- **대시보드:** 실제 DB KPI/기간 필터/UTC 시간별 차트. UNKNOWN은 실패와 구분합니다. 평균은 최근 처리 기록이며 전체 재시도 경과시간과 다릅니다. 통계 기간은 시작 포함/종료 제외·최대 31일입니다.
+- **Simulation Lab:** SUCCESS, HTTP_400/500, DELAY/TIMEOUT, INVALID_RESPONSE, FAIL_THEN_SUCCESS, DUPLICATE, CONNECTION_FAILURE. 요청 범위/유효기간/수신 한도가 있습니다. 일반 수동 execute는 독립 실험, **재시도 정책으로 실행**은 같은 요청의 신뢰성 실험입니다.
+- **Retry Center:** 실행 상태·마지막 결과·시도 수·예약 시각, 허용 오류의 수동 추가 예약. 자동 한도는 최초 포함 1~5(샘플 기본 1), 수동 포함 총 10회입니다. 400/409/검증·매핑 실패는 새 전문/새 Request ID로 전송합니다.
 
-- **인터페이스 관리:** 신규 등록, ID/이름 검색, 출발 시스템 등록, 설정·매핑·검증 JSON 편집, 활성 상태, 최근 50개 설정 버전. 수정에는 현재 version이 필요하며 충돌은 409입니다.
-- **전송 이력:** Request/Interface/Trace ID 검색, 상태 필터, 페이지, 내부 UUID 기반 상세와 접수 당시 설정 스냅샷. 이력이 있는 인터페이스는 삭제 대신 비활성화됩니다.
-- **기본 규칙:** userId/userName은 필수 문자열이며 employee_id/employee_name으로 매핑됩니다. departmentCode → dept_code와 email은 선택 필드입니다. 누락/타입/변환 결과 검증 실패는 해당 단계와 필드 오류를 반환하며 Attempt ID가 없고 HTTP도 호출하지 않습니다.
+객체 점 경로/배열 값 전체 복사, COPY/STRING/NUMBER/BOOLEAN/DATE, 기본값/Null 정책, 엄격한 LocalDate/LocalDateTime/RE2 검증을 지원합니다. 배열 인덱스·와일드카드·사용자 스크립트·시간대 변환은 지원하지 않습니다. 상세 계약은 [API](docs/API.md)에 있습니다.
 
-다크/라이트와 모바일 너비 레이아웃을 제공합니다. **Trace Explorer**에서 Trace ID를 검색하면 요청별 단계 이벤트, HTTP Attempt, 마스킹된 전문·오류·최종 결과를 조회합니다. **대시보드**는 기간별 성공/실패/UNKNOWN/진행 중, 성공률, 평균 전체 처리시간, 최근 오류, 인터페이스별 현황과 UTC 시간별 막대 지표를 DB에서 집계합니다. 처음 열면 현황 조회를 눌러 실행합니다.
+## 재시도·멱등성·불확실성
 
-```powershell
-$body = @{ interfaceId='IF-USER-001'; requestId='REQ-DEMO-0001'; payload=@{userId='USER001';userName='홍길동'} } | ConvertTo-Json
-Invoke-RestMethod http://localhost:8080/api/requests -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
-```
+Request ID는 `(interfaceId, sourceSystem, scope)` 안의 논리 키, Trace ID는 상관관계, Attempt ID는 실제 HTTP 시도입니다. 일반 scope는 normal, 신뢰성 실험 scope는 시나리오 UUID입니다. 같은 키/같은 전문의 완료 요청은 최초 UUID/Trace/저장 결과를 재사용하고 진행 중 중복은 409, 다른 전문도 409입니다. 재시도는 같은 Request/Trace/버전과 새 Attempt를 사용합니다.
 
-같은 traceId가 응답과 대상 HTTP 응답에 포함됩니다. `docker compose logs integration target`에서 traceId를 검색하거나 다음 SQL로 양쪽 기록을 조회합니다.
+Target은 업무 결과를 지연/응답 손실 전에 짧은 트랜잭션으로 커밋하고 고유키/hash가 같은 재전달에는 저장된 OK 결과를 재사용합니다. Integration은 Target의 interfaceflow-v1 capability를 먼저 확인합니다. 외부 HTTP는 DB 트랜잭션 밖에서 실행합니다. I/O·5xx·응답 계약 오류는 UNKNOWN이며 확정 실패로 바꾸지 않습니다. 실행 state WAIT/LEASED/DONE/DEAD_LETTER와 마지막 요청 결과는 별개입니다.
 
-```sql
-SELECT * FROM integration.if_request WHERE trace_id = '응답의 traceId';
-SELECT * FROM target.if_target_receipt WHERE trace_id = '응답의 traceId';
-```
-
-OpenAPI는 각 서버 `/swagger-ui/index.html`과 `/v3/api-docs`에서 확인합니다. [API 계약](docs/API.md), [테스트 시나리오](docs/TEST-SCENARIOS.md), [상세 아키텍처](docs/ARCHITECTURE.md)를 참고하세요.
+원본/고정 설정은 외부 32-byte base64 REPLAY_KEY로 AES-256-GCM 보호하고 공개 상세에는 마스킹 snapshot만 제공합니다. 키 누락은 신규 접수 503, 키 손실은 원본 복구 불가입니다. 서버 중단은 실제 60초 lease 만료 후 예산 안에서 복구하고 소유 token/만료 검사로 늦은 완료를 차단합니다. HTTP exactly-once나 임의 외부 업무 시스템의 멱등성을 보장하지 않습니다.
 
 ## 자동 검증
 
-```powershell
-mvn -B -s .mvn/settings.xml verify
-cd frontend
-npm test
-npm run build
-```
-
-기본 Maven 검증은 단위·HTTP 테스트를 실행합니다. DB 통합 테스트는 명시적으로 활성화합니다.
+| 검증 | 명령/조건 | 로컬 실행 근거 |
+| --- | --- | --- |
+| 단위·HTTP 계약 | `mvn -B -s .mvn/settings.xml verify` | DB 제외 기본 경로 |
+| 실제 Testcontainers PostgreSQL | 아래 RUN_DB_TESTS 설정, TEST_DB_URL 미설정 | Maven 79건, 실패/오류/skip 0 |
+| Frontend | frontend에서 `npm ci`, `npm test`, `npm run build` | Vitest 13건·타입/배포 빌드 |
+| 전체 Compose·Nginx·DB·E2E·복구 | 루트 `node scripts/Test-Compose.mjs` | desktop/mobile 34건 + 컨테이너 강제 종료 복구 |
+| SQL 성능 | `ALLOW_PERF_TEST=true` 후 Test-QueryPerformance.mjs | [10만 가상 행 측정](docs/PERFORMANCE.md), 운영 SLA 아님 |
+| GitHub Actions | push/PR 시 실행하도록 구성 | 원격 미실행 |
 
 ```powershell
 $env:RUN_DB_TESTS='true'
+$env:REPLAY_KEY=[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 mvn -B -s .mvn/settings.xml verify
+# frontend 의존성과 Chrome이 설치된 상태에서 저장소 루트
+node scripts/Test-Compose.mjs
 ```
 
-위 명령은 Docker의 PostgreSQL 17 Testcontainers를 사용합니다. 별도의 폐기 가능한 로컬 PostgreSQL을 쓰려면 `TEST_DB_URL=jdbc:postgresql://localhost:5432/테스트DB`를 지정하세요. 이 경로는 사용자 `interfaceflow`, 암호 `local-test`인 테스트 전용 DB를 기대합니다. 두 경로 모두 실제 Flyway migration과 MyBatis를 실행합니다. Testcontainers는 이 PC에 Docker가 없어 실행하지 않았으며, 임시 PostgreSQL 17.6에서 외부 DB 경로를 검증했습니다.
+Testcontainers 기본 경로는 Docker PostgreSQL 17을 생성·종료하며 Testcontainers 1.21.4로 Docker 29를 검증했습니다. Docker 없이 폐기 가능한 외부 테스트 DB를 사용하려면 TEST_DB_URL을 지정합니다. 이 경로는 사용자 interfaceflow/암호 local-test를 기대합니다. 실제 운영 DB에 실행하지 마세요.
 
-별도 JVM 왕복 smoke 검증은 빌드 후 DB_URL, DB_USER, DB_PASSWORD 환경 변수를 지정하고 `./scripts/Test-Smoke.ps1`을 실행합니다. Java 21이 PATH에 없다면 `-Java 'JDK21의 java.exe 경로'`를 지정합니다. 기본 18080/18081 포트에서 두 JAR를 실행·검증한 후 종료합니다.
+Test-Compose는 기본 .env를 수정하지 않고 고유 프로젝트·동적 loopback 포트·새 DB volume·임시 암호/키를 사용합니다. 빌드·fresh migration·34개 브라우저 테스트 후 Target 커밋 직후 Integration을 SIGKILL/재시작하여 실제 lease 복구와 DB 정합성을 확인합니다. 자신이 만든 자원만 정리합니다. 최초 이미지/의존성 다운로드에는 네트워크와 시간이 필요합니다. 성공 결과는 정리까지 끝난 뒤 `.tools/phase7-compose-result.json`, 로그는 `.tools/phase7-compose.log`, 브라우저 보고서는 frontend/playwright-report에 남습니다.
 
-실제 브라우저와 양쪽 DB 기록까지 검사하려면 설치된 Chrome과 frontend 의존성이 준비된 상태에서 실행합니다.
+기본 브라우저는 설치된 Chrome입니다. Edge는 PLAYWRIGHT_CHANNEL=msedge, `npx playwright install chromium` 후 Chromium은 PLAYWRIGHT_CHANNEL=chromium을 사용합니다. CI는 Linux Chromium이므로 로컬 Windows Chrome 성공과 구분합니다. 테스트 DB 자격증명은 브라우저 번들에 포함하지 않습니다.
 
-```powershell
-./scripts/Test-Smoke.ps1 -BrowserTests
-```
+기존 JVM 검증도 유지합니다. 빌드한 JAR와 DB_URL/DB_USER/DB_PASSWORD/REPLAY_KEY를 준비한 뒤 `./scripts/Test-Smoke.ps1 -BrowserTests` 또는 `node scripts/Test-Recovery.mjs`를 실행합니다. Java 21 경로는 각각 -Java/RECOVERY_JAVA로 지정합니다. 테스트 포트와 같은 키를 확인하세요. 상세 절차는 [검증 시나리오](docs/TEST-SCENARIOS.md), [실행·장애 데모 및 문제 해결](docs/DEMO.md)에 있습니다.
 
-스크립트는 두 JVM과 개발 프록시를 연결하여 데스크톱·모바일 너비의 Playwright 테스트 32건을 실행합니다. 정상 전송은 실제 HTTP와 PostgreSQL을 사용하며, 네트워크 중단·HTML 502 피드백만 별도 오류 주입으로 검사합니다. 각 전송은 테스트 이력을 남기므로 폐기 가능한 DB를 사용하세요. Edge는 `PLAYWRIGHT_CHANNEL=msedge`, Playwright Chromium은 `npx playwright install chromium` 후 `PLAYWRIGHT_CHANNEL=chromium`을 지정할 수 있습니다.
+## 화면과 남은 범위
 
-이미 실행 중인 Compose 스택을 검사하려면 frontend 폴더에서 `E2E_BASE_URL=http://127.0.0.1:5173`, `E2E_DB_URL=postgresql://127.0.0.1:5432/interfaceflow`, 해당 DB_USER/DB_PASSWORD 환경 변수를 설정한 뒤 `npm run test:e2e`를 실행합니다. E2E_BASE_URL을 지정하지 않으면 Vite가 15173 포트에서 시작되며 `API_PROXY_TARGET`(기본 localhost:8080)을 사용합니다. 테스트용 DB 연결 변수는 브라우저 번들로 전달하지 않습니다.
+[대시보드](docs/screenshots/phase7-dashboard-desktop.png) · [모바일 대시보드](docs/screenshots/phase7-dashboard-mobile.png) · [이력·전문 비교](docs/screenshots/phase7-history-desktop.png) · [Retry Center](docs/screenshots/phase7-retry-mobile.png). Compose E2E에서 생성한 가상 데이터 화면입니다.
 
-보고서는 `frontend/playwright-report`, 캡처는 `frontend/test-results`에 생성됩니다. 로컬 Chrome에서 실제 전송·양쪽 DB 일치, 미리보기, 검증 실패 시 대상 미호출, 인터페이스 등록/수정/버전/이력/비활성화와 화면을 검증했습니다. [전송 화면](docs/screenshots/phase2-sender.png), [인터페이스 편집](docs/screenshots/phase2-interfaces.png), [모바일 이력](docs/screenshots/phase2-history-mobile.png)을 확인할 수 있습니다.
-
-GitHub Actions에 Java 21/Node 22와 Testcontainers 검증, Compose 전체 스택의 브라우저·DB 검증 작업을 구성했습니다. Docker가 없는 이 PC에서는 Compose/Testcontainers 경로와 원격 워크플로를 실행하지 않았습니다. 현재 실행 결과와 미검증 항목은 [PROGRESS](docs/PROGRESS.md)에 기록합니다.
-
-## 알려진 제약과 다음 단계
-
-- 객체 점 경로와 COPY/STRING/NUMBER/BOOLEAN/DATE만 지원합니다. 배열 값 전체 복사는 가능하지만 배열 인덱스·와일드카드·스크립트 변환은 지원하지 않습니다. 매핑 배열이 비어 있으면 독립적인 원본 복사입니다.
-- 일반 전송은 Interface/출발 시스템/Request ID로 중복 실행을 막고 같은 키의 다른 전문은 409로 거절합니다. 과거 이력과 Phase 4 수동 실험은 자동으로 신뢰성 등록하지 않습니다.
-- Timeout/5xx/응답 계약 오류는 UNKNOWN으로 기록합니다. Simulation Lab에서 범위가 제한된 실제 오류를 재현합니다. 연결 실패는 서버 설정의 닫힌 주소로 HTTP 접속을 시도합니다.
-- DB·조회·미리보기에는 민감 키와 민감 source의 매핑 target을 마스킹한 전문을 사용합니다. 실제 HTTP 데이터는 변경하지 않습니다. 마스킹된 이력은 재전송하지 않으며 별도 AES-GCM 보호 원본을 사용합니다. Trace Explorer는 V3 이후 실제 저장된 이벤트를 제공합니다. 이전 기록의 단계·Attempt 시간은 생성하지 않습니다.
-- 인증은 미구현입니다. Compose는 localhost에만 노출합니다. 프론트엔드만 GitHub Pages에 배포해도 백엔드는 실행되지 않습니다.
-- 실제 HTTP 통신과 기록의 기반 단계이며 exactly-once 전달을 보장하지 않습니다.
-
-설정 예제와 매핑·검증 상세 구문은 [API 계약](docs/API.md)에 있습니다. 인터페이스당 최대 100개 매핑/검증 규칙, 입력/변환 결과 각각 64KiB, 날짜 uuuu의 엄격한 LocalDate/LocalDateTime, RE2 정규식을 지원합니다. timeout은 인터페이스별로 적용하지만 retryMaxAttempts는 최초 시도를 포함한 총 자동 시도 수(1~5)이며, 수동 추가를 포함한 절대 한도는 10회입니다.
-
-V2 Flyway migration은 기존 Phase 1 요청을 보존합니다. 이전 기록은 전문·설정 버전이 null일 수 있으며 UI에 이전 기록으로 표시됩니다. 자동 보관기간 삭제는 아직 없고 권장 30일 정리 절차는 [아키텍처](docs/ARCHITECTURE.md)에 있습니다. 설정 기본값에는 비밀을 넣지 마세요.
-
-최종적으로 timeout 이후 처리 불확실성, 중복 요청, 재시도와 복구 과정을 재현하고 근거를 추적하는 플랫폼을 목표로 합니다. [PROJECT](PROJECT.md)는 전체 명세이며 구현 완료 목록이 아닙니다.
-
-
-Phase 3 통계 기간은 시간대가 포함된 ISO Instant이며 기본 최근 24시간, 최대 31일, 시작 이상·종료 미만입니다. 이력 기간 입력은 브라우저 로컬 시간입니다. UNKNOWN은 실패 수와 구분하고 재처리 대기·소진은 Retry Center에서 확인합니다. 이벤트 시각은 저장 시각이며 세부 단계 실행시간이 아닙니다. Target 내부 TARGET_RECEIVED/TARGET_RESPONDED는 동일 Trace/Request/Attempt ID의 구조화 로그로 확인하며 Explorer에 Target 내부 이벤트를 수집하지는 않습니다. Trace당 조회는 최대 100개 요청이며 초과하면 개별 전송 이력으로 조회합니다. API·시간 정의는 [ADR-010](docs/DECISIONS.md)과 [API](docs/API.md)를 참고하세요.
-
-
-## Simulation Lab 사용
-
-1. **Simulation Lab**에서 인터페이스·장애 유형·Request ID를 선택하고 **시나리오 등록**을 누릅니다. UI 시나리오는 15분 유효하며 일반 전문 전송에는 영향을 주지 않습니다.
-2. 가상 전문을 입력하고 **시나리오 실행**을 누릅니다. 내부 요청 UUID/Trace/Attempt와 상태·HTTP·오류를 비교하고 Trace Explorer로 상세를 조회합니다.
-3. FAIL_THEN_SUCCESS는 같은 시나리오를 설정 횟수보다 많이 실행하면 500 이후 성공합니다. DUPLICATE는 첫 실행 성공, 두 번째부터 409입니다. 자동 재시도·업무 멱등성은 아닙니다.
-4. TIMEOUT 지연은 선택한 인터페이스의 timeoutMs보다 길게, 최대 15000ms로 설정합니다. 응답이 늦어 UNKNOWN이어도 Target 수신 기록이 남을 수 있습니다. DELAY가 timeout을 넘는 경우도 UNKNOWN입니다.
-5. **새 실험**은 새 UUID로 등록하기 위한 화면 초기화입니다. 기존 시나리오를 삭제하지 않습니다. 목록 조회로 최근 100개 설정과 Target 수신 횟수를 확인할 수 있습니다.
-
-SUCCESS, HTTP_400, HTTP_500, DELAY, TIMEOUT, INVALID_RESPONSE, FAIL_THEN_SUCCESS, DUPLICATE, CONNECTION_FAILURE를 제공합니다. 오류 응답은 실제 Target JVM에서 발생합니다. CONNECTION_FAILURE는 Target 제어 API에서 시나리오를 읽은 후 서버 설정 `CONNECTION_FAILURE_URL`(기본 `http://127.0.0.1:1`)로 실제 연결을 시도합니다. 해당 주소가 닫혀 있어야 접속 오류가 재현됩니다. UI에 임의 URL을 입력하는 기능은 없습니다. 이 경로는 Target 수신 횟수와 receipt를 만들지 않습니다.
-
-Target의 `SIMULATIONS_ENABLED=false`로 시나리오 등록·조회·실행을 비활성화할 수 있으며 일반 전송은 유지됩니다. Compose는 `.env`의 해당 변수와 `CONNECTION_FAILURE_URL`을 전달합니다. 기본 실행은 localhost 개발 실험용이고 인증은 미구현입니다. 직접 실행 시 두 값은 각각 Target/Integration 터미널에서 설정합니다.
-
-Target 도착 시 시나리오 UUID와 Interface/Request ID, 만료, 최대 20회 수신을 검사합니다. 반복 실행은 같은 Request ID지만 별도 내부 요청·Attempt이며 Trace는 상위 헤더가 없으면 새로 발급됩니다. 제어 API 장애는 502로 응답하고 아직 전송 요청을 접수하지 않습니다. 지연 중 DB 트랜잭션을 유지하지 않으며 동기 HTTP 스레드는 응답 대기 동안 사용합니다. 시나리오·전문 자동 보관 삭제는 아직 없고, 이 절의 일반 실행과 별도로 재시도 정책 실행을 제공합니다. 상세 계약과 제한은 [API](docs/API.md), [ADR-011](docs/DECISIONS.md)에 있습니다.
-
-검증 화면: [Simulation Lab](docs/screenshots/phase4-simulation.png), [모바일 너비](docs/screenshots/phase4-simulation-mobile.png).
-
-
-## Retry Center와 안전한 재시도
-
-일반 **전문 전송**은 같은 Interface ID·설정의 sourceSystem·Request ID를 하나의 요청으로 등록합니다. 같은 전문의 최종 결과를 다시 요청하면 최초 UUID·Trace와 저장된 결과를 반환합니다. 진행/대기 중은 409, 같은 키의 다른 전문도 409입니다. 전문을 수정해 다시 시작하려면 새 Request ID를 사용하세요. 설정 변경 이후에도 재처리는 최초 버전을 사용합니다.
-
-자동 시도 한도는 인터페이스의 `retryMaxAttempts`이며 최초를 포함합니다. 기본 샘플은 **1회**이므로 자동 반복을 보려면 인터페이스 관리에서 3회 등으로 설정하세요. 408/429/5xx/통신/응답 계약 오류에 지수 backoff·jitter를 적용하고 400/409/검증·매핑 오류는 재시도하지 않습니다. UNKNOWN은 확정 실패로 바꾸지 않습니다.
-
-**Simulation Lab → 재시도 정책으로 실행**은 같은 시나리오 UUID의 신뢰성 경로입니다. FAIL_THEN_SUCCESS·TIMEOUT·INVALID_RESPONSE를 선택해 Target 결과 재사용을 확인할 수 있습니다. 기존 **시나리오 실행**은 Phase 4 수동 반복 실험이며 업무 멱등성과 자동 재시도를 적용하지 않습니다.
-
-**Retry Center**는 최근 100개 보호된 요청의 마지막 결과와 큐 상태, 시도 수, 다음 시각을 5초마다 갱신합니다. 자동 한도 소진 시 DEAD_LETTER와 마지막 UNKNOWN이 함께 표시될 수 있습니다. 허용 오류의 **한 번 더 예약**은 기존 요청/Trace에 새 Attempt를 예약하고 절대 총 10회까지만 허용합니다. 성공·영구 오류·진행/대기 중·보호 원본 없는 과거 요청은 재처리할 수 없습니다.
-
-Target은 `interfaceflow-v1` 멱등성 프로토콜을 제공해야 합니다. Source는 업무 POST 전에 이를 확인하고 미확인 상태에서는 전송하지 않습니다. Target은 변환 전문 hash를 검증하며 지연/응답 손실 이후 동일 요청에는 저장된 OK 업무 결과를 재사용합니다. 60초 lease가 만료된 미완료 작업은 UNKNOWN Attempt를 남긴 뒤 정책 예산 내에서 재개하고 오래된 작업자의 완료는 fencing token으로 거절합니다. 즉시 복구나 exactly-once HTTP 전달을 주장하지 않습니다.
-
-`REPLAY_KEY`가 없으면 신규 일반/신뢰성 전송은 503입니다. 원본·불변 설정은 임의 nonce와 내부 UUID AAD를 가진 AES-256-GCM으로 보관합니다. 키는 DB/브라우저/로그에 넣지 않고 재시작·복구 시 같은 값을 사용하세요. 키를 잃으면 원본 복구가 불가능하며 자동 키 회전·자동 삭제는 제공하지 않습니다. 공개 상세/Trace는 마스킹된 진단 값만 제공합니다. 인증은 미구현이므로 기존 localhost 개발 환경을 유지합니다. CI의 고정 키는 폐기용 테스트 전용입니다.
-
-실제 JVM 강제 종료·재시작 복구를 검증하려면 폐기 가능한 DB와 같은 REPLAY_KEY, 빌드한 두 JAR, frontend의 테스트 의존성(pg)이 필요합니다.
-
-```powershell
-$env:RECOVERY_JAVA='Java 21의 java.exe 경로' # PATH에 있으면 생략
-node scripts/Test-Recovery.mjs
-```
-
-기본 테스트 포트는 18080/18081이며 기존 프로세스가 있으면 시작을 거절합니다. 스크립트는 자신이 만든 Integration만 강제 종료·재시작하고 실제 60초 lease 만료를 기다려 Target 업무 결과 한 건/새 Attempt/같은 Trace를 검증한 후 자신이 만든 두 JVM을 종료합니다. `RECOVERY_INTEGRATION_PORT`/`RECOVERY_TARGET_PORT`로 테스트 포트를 바꿀 수 있습니다. 임시 PostgreSQL을 시작/종료하지는 않습니다. 가상 데이터만 사용하고 진단 로그는 .tools/recovery-*.log에 남습니다.
-
-구체적인 상태·API·보관 한계는 [API](docs/API.md), [ADR-012/013](docs/DECISIONS.md), [진행 및 실행 결과](docs/PROGRESS.md)를 참고하세요.
-
-
-
-검증 화면: [Retry Center](docs/screenshots/phase5-retry-center.png), [모바일 너비](docs/screenshots/phase5-retry-center-mobile.png). 좁은 화면의 표는 좌우로 스크롤할 수 있습니다.
-
-## Phase 6 콘솔과 조회
-
-Dashboard에서 실제 DB 집계를 KPI와 UTC 시간별 차트로 확인합니다. 기간을 적용하면 빈 시간도 0으로 표시하고 처리불확실(UNKNOWN)은 실패와 구분합니다. 좁은 화면의 차트·표는 키보드 초점 후 좌우 스크롤할 수 있습니다. 통계 표는 최근 표시 한도를 안내합니다.
-
-요청 이력은 검색·상태·기간을 적용하고 이전/다음 커서로 이동합니다. 상세의 JSON 비교는 마스킹된 변환 전후 leaf 경로를 표시하며 `∅`는 필드 부재입니다. 암호화된 재처리 원문은 공개하지 않습니다. 비교 한도 초과는 화면에 표시됩니다. 키보드 첫 Tab의 본문 이동, 명시적 상태 텍스트, 라이트/다크 테마를 지원합니다.
-
-background retry는 `RETRY_CONCURRENCY=2`가 기본이며 1~4만 허용합니다. 직접 실행은 Integration 터미널의 환경 변수, Compose는 .env로 설정합니다. 최대 20건 배치를 처리하며 최초 API 전송의 동시성 제한은 아닙니다. 기존 lease/fencing·Request/Trace 유지·새 Attempt 정책을 따릅니다.
-
-10만 가상 행 SQL 비교와 재현 명령, 측정 한계는 [성능 기록](docs/PERFORMANCE.md)에 있습니다. 검증 결과와 Phase 7의 Docker/Testcontainers/CI 잔여 작업은 [진행 상태](docs/PROGRESS.md)를 확인하세요.
-
-검증 화면: [대시보드](docs/screenshots/phase6-dashboard-desktop.png), [모바일 차트](docs/screenshots/phase6-dashboard-mobile.png), [전문 비교](docs/screenshots/phase6-history-desktop.png), [모바일 이력](docs/screenshots/phase6-history-mobile.png).
+인증/권한·자동 키 회전/보관 삭제·재처리 원본 편집·중앙 로그 수집·세부 단계 실행시간·다중 인스턴스 부하/전체 처리량·실제 휴대폰/스크린리더 검증은 남아 있습니다. 고유키/업무 결과 삭제나 키 손실은 재처리·중복 방지 보장에 영향을 줍니다. 현재 localhost 개발용이며 전체 운영 완성으로 간주하지 않습니다. Phase 7 이후 새 Phase를 임의로 시작하지 않습니다. 원격 CI 결과 확인과 후속 범위는 사용자와 정합니다.

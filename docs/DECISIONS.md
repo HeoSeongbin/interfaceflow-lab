@@ -121,3 +121,13 @@ V6에서 시간/상태 복합 정렬 인덱스와 due 후보 인덱스를 추가
 작업자는 한 poll 최대 20건을 고정 풀로 실행하며 RETRY_CONCURRENCY 기본 2, 허용 1~4다. 각 작업이 실제 실행될 때 claim하므로 풀 대기 시간에 lease를 소모하지 않는다. invokeAll로 배치 종료를 기다려 같은 프로세스의 poll이 겹치지 않는다. 종료 시 풀을 중단하며 중단된 실행은 기존 만료 복구 정책을 따른다. 이 설정은 background retry 작업자만 제한하며 최초 API 전송이나 다중 인스턴스 전체 동시성을 제한하지 않는다. HTTP를 DB 트랜잭션에 넣지 않는다.
 
 콘솔 비교는 공개된 마스킹 snapshot만 사용하며 JSON Pointer leaf 단위로 부재/타입/값을 비교한다. 비교는 500개 차이·탐색 예산·깊이 제한으로 중단하고 절단 사실을 표시한다. 시간별 차트는 실제 DB 집계를 UTC로 빈 시간까지 채우고 UNKNOWN을 실패와 별도 표시한다. 키보드 skip link/초점/스크롤 영역, 명시적 상태 텍스트와 라이트·다크 테마를 유지한다. 전체 접근성 인증이나 운영 부하 SLA를 주장하지 않는다.
+
+## ADR-015 · 2026-10-20 · 독립 Compose 검증과 실행 근거
+
+실제 Testcontainers 기본 경로를 실행하자 Docker Engine 29에서 Boot 관리 Testcontainers 1.21.3의 Docker API 요청이 400으로 실패했다. 1.21.4로 패치 버전을 명시하고 별도 api.version 옵션 없이 PostgreSQL 컨테이너·79개 테스트·빌드를 재검증했다. 런타임 Spring/Java/MyBatis 버전은 변경하지 않는다. [공식 1.21.4 릴리스](https://github.com/testcontainers/testcontainers-java/releases/tag/1.21.4)는 Docker Engine 변경 호환 패치다. 전역 Docker 설정이나 사용자 환경의 API 버전을 낮추지 않는다.
+
+Compose 검증은 Vite 프록시와 외부 DB 검증만으로 대신하지 않는다. Test-Compose.mjs가 무작위 고유 프로젝트명·동적 loopback 포트·새 volume·임시 암호/키로 원래 Compose 파일을 빌드하고 실제 Nginx/두 JVM/PostgreSQL을 연결한다. 기존 프로젝트 충돌은 사전에 거절하고 성공/실패 모두 자신의 로그를 수집한 뒤 자신의 volume/컨테이너/네트워크만 정리한다. 기본 개발 포트는 유지하되 환경 변수로 host port를 바꿀 수 있다. 비밀은 결과 파일·명령행·진단 로그에 출력하지 않는다.
+
+완료 판정은 fresh Flyway 양쪽 이력, 실제 desktop/mobile E2E, 동시 중복/본문 충돌/결과 재사용과 Target 업무 한 건, Target 커밋 직후 Integration SIGKILL/같은 DB·키로 재시작/실제 lease 만료 복구를 구분한다. Request/Trace 유지·새 Attempt·이전 UNKNOWN과 최종 SUCCESS를 직접 DB 대조한다. 서비스 코드는 이 검증을 위해 불확실성을 성공/실패로 보정하지 않는다.
+
+GitHub Actions는 같은 스크립트를 실행하고 Surefire·브라우저·Compose 로그/결과를 artifact로 남긴다. 로컬 Windows Chrome·Docker 성공을 Linux Chromium 또는 원격 Actions 성공으로 기록하지 않는다. workflow 설정과 원격 실행은 별도 근거다. 이번 Phase에서는 사용자 요청 없이 push/원격 실행을 하지 않는다.

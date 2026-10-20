@@ -5,7 +5,7 @@ services:
       POSTGRES_DB: interfaceflow
       POSTGRES_USER: interfaceflow
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-    ports: ["127.0.0.1:5432:5432"]
+    ports: ["127.0.0.1:${DB_PORT:-5432}:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U interfaceflow -d interfaceflow"]
@@ -22,7 +22,7 @@ services:
       DB_USER: interfaceflow
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       SIMULATIONS_ENABLED: ${SIMULATIONS_ENABLED:-true}
-    ports: ["127.0.0.1:8081:8081"]
+    ports: ["127.0.0.1:${TARGET_PORT:-8081}:8081"]
     depends_on:
       db: { condition: service_healthy }
   integration:
@@ -36,7 +36,7 @@ services:
       RETRY_CONCURRENCY: ${RETRY_CONCURRENCY:-2}
       REPLAY_KEY: ${REPLAY_KEY:?Set a stable base64 32-byte REPLAY_KEY in .env}
       CONNECTION_FAILURE_URL: ${CONNECTION_FAILURE_URL:-http://127.0.0.1:1}
-    ports: ["127.0.0.1:8080:8080"]
+    ports: ["127.0.0.1:${INTEGRATION_PORT:-8080}:8080"]
     depends_on:
       db: { condition: service_healthy }
       target: { condition: service_started }
@@ -44,7 +44,7 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
-    ports: ["127.0.0.1:5173:80"]
+    ports: ["127.0.0.1:${FRONTEND_PORT:-5173}:80"]
     depends_on: [integration]
 volumes:
   pgdata:

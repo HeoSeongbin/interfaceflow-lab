@@ -323,3 +323,27 @@ test('dashboard chart and keyboard skip navigation expose accessible diagnostics
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.screenshot({path:testInfo.outputPath('phase6-dashboard.png'),fullPage:true});
 });
+
+test('concurrent reliable submissions preserve one logical request and reject changed payload',async({page})=>{
+ const sample=await (await page.request.get('/api/interfaces/IF-USER-001')).json();
+ const interfaceId=`IF-RACE-${crypto.randomUUID()}`,requestId=`RACE-${crypto.randomUUID()}`;
+ expect((await page.request.post('/api/interfaces',{data:{...sample,interfaceId,interfaceName:'Concurrent HTTP test',version:0,timeoutMs:3000,retryMaxAttempts:1}})).status()).toBe(201);
+ const scenario=await (await page.request.post('/api/simulations',{data:{type:'DELAY',interfaceId,requestId,delayMs:1500,failureCount:0,expiresAt:new Date(Date.now()+600000).toISOString()}})).json();
+ const url=`/api/simulations/${scenario.id}/reliable-execute`,data={interfaceId,requestId,payload:{userId:'RACE001',userName:'Virtual race'}};
+ const databaseURL=new URL(process.env.E2E_DB_URL!);databaseURL.username=process.env.DB_USER||'interfaceflow';databaseURL.password=process.env.DB_PASSWORD||'';
+ const database=new pg.Client({connectionString:databaseURL.toString()});
+ try{
+  await database.connect();
+  const pending=page.request.post(url,{data});
+  await expect.poll(async()=>Number((await database.query('SELECT count(*) FROM target.if_business_result WHERE scope=$1',[scenario.id])).rows[0].count)).toBe(1);
+  const duplicate=await page.request.post(url,{data});expect(duplicate.status()).toBe(409);expect((await duplicate.json()).code).toBe('REQUEST_IN_PROGRESS');
+  const response=await pending;expect(response.status()).toBe(200);const result=await response.json();expect(result.status).toBe('SUCCESS');
+  const replay=await page.request.post(url,{data});expect(replay.status()).toBe(200);const cached=await replay.json();
+  expect([cached.id,cached.traceId,cached.attemptId]).toEqual([result.id,result.traceId,result.attemptId]);expect(replay.headers()['x-trace-id']).toBe(result.traceId);
+  const conflict=await page.request.post(url,{data:{...data,payload:{...data.payload,userName:'Changed'}}});expect(conflict.status()).toBe(409);expect((await conflict.json()).code).toBe('PAYLOAD_CONFLICT');
+  expect(Number((await database.query('SELECT count(*) FROM integration.if_delivery WHERE scope=$1',[scenario.id])).rows[0].count)).toBe(1);
+  expect(Number((await database.query('SELECT count(*) FROM integration.if_attempt WHERE request_key=$1',[result.id])).rows[0].count)).toBe(1);
+  expect(Number((await database.query('SELECT count(*) FROM target.if_business_result WHERE scope=$1',[scenario.id])).rows[0].count)).toBe(1);
+  expect(Number((await database.query('SELECT count(*) FROM target.if_target_receipt WHERE simulation_id=$1',[scenario.id])).rows[0].count)).toBe(1);
+ }finally{await database.end();}
+});

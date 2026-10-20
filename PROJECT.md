@@ -1475,3 +1475,7 @@ Phase 2 이후의 고급 기능을 먼저 구현하지 않는다.
 ## 28. 현재 구현 범위 — 2026-10-20 Phase 6
 
 콘솔 KPI/실제 UTC 시간별 차트·기간 필터, 마스킹 JSON 비교, 상태 배지·Attempt 표, 키보드 접근/반응형 스크롤·다크모드, 오류 metadata 표시를 개선했다. 이력 UI에 필터 결합 커서 조회를 적용하고 기존 페이지 API를 유지한다. V6/V7 인덱스 검토·만료 작업 조회 개선과 제한된 background 병렬 처리(기본 2, 1~4)를 추가했다. SQL 측정은 가상 10만 행의 로컬 단일 실행이며 전체 시스템 SLA나 인증된 접근성을 뜻하지 않는다. 실검증 결과와 제약은 PROGRESS/PERFORMANCE/ADR-014를 따른다. Phase 7 통합 환경 검증은 별도 단계다.
+
+## 29. 현재 구현 범위 — 2026-10-20 Phase 7
+
+Testcontainers 실제 Docker 경로, fresh Compose 빌드/별도 Nginx·두 JVM·PostgreSQL E2E, 동시 중복/본문 충돌/결과 재사용, Target 커밋 뒤 Integration 컨테이너 중단·실제 lease 만료 복구의 검증 경로를 구성했다. Testcontainers Docker 29 호환 패치와 격리 프로젝트/host port 설정, CI artifact·공통 Compose 검증 스크립트, 현행 아키텍처/실행·장애 대본을 추가했다. 실제 실행 결과는 PROGRESS를 따른다. 로컬 통과와 원격 GitHub Actions 실행을 구분하며 후자는 실행 전까지 미검증이다. 최종 명세의 인증·키 회전 등 미구현 범위를 완료로 간주하지 않는다.

@@ -74,3 +74,12 @@ Docker/Testcontainers/원격 CI 실행 여부는 PROGRESS와 구분한다. DB le
 - JSON 비교: 부재/null/false/0/타입/객체 순서/배열/JSON Pointer escape/절단. UTC 차트의 빈 시간/반개구간/최대 기간 검증. API 오류의 HTTP/code/Trace 보존 검증.
 - Chrome: 실제 12건 전송 후 커서 앞뒤 이동·마스킹 비교, 키보드 본문 이동·실제 차트·라이트 테마·모바일 페이지 overflow 검증. 기존 HTTP/DB/재시도/복구 회귀 유지.
 - SQL 성능 재현과 해석 범위: PERFORMANCE.md. Docker/Testcontainers/원격 CI는 실행 전까지 미검증으로 둔다.
+
+## Phase 7 통합 검증 경로
+
+1. Docker 엔진 실행 후 RUN_DB_TESTS=true/REPLAY_KEY를 설정하고 Maven verify. TEST_DB_URL을 설정하지 않아 실제 PostgreSQL Testcontainers 기본 경로를 사용한다. 양쪽 DB·HTTP 계약·상태/멱등성/동시성·마이그레이션을 실행한다.
+2. frontend npm ci/test/build, Playwright 타입 검사. 정상 응답을 모의하지 않는 실제 E2E 17개 시나리오 × desktop/mobile = 34건이다. 새 동시성 시나리오는 신뢰성 DELAY 처리 중 중복 409, 완료 뒤 같은 UUID/Trace/Attempt의 결과 재사용, 변경 전문 409, Source 요청/Attempt와 Target 업무/receipt 각 한 건을 확인한다.
+3. 루트 `node scripts/Test-Compose.mjs`: 새 Docker volume·독립 두 JVM·실제 Nginx 프록시에서 위 E2E, fresh Integration V1~V7/Target V1~V3 migration, 실제 컨테이너 SIGKILL/restart·60초 lease 만료·이전 UNKNOWN/새 SUCCESS Attempt·Target 업무 결과 한 건 검증. 로그/브라우저 보고서와 성공 JSON을 생성하고 자신의 자원을 정리한다.
+4. GitHub Actions는 같은 명령을 실행하도록 구성했다. 로컬 통과와 원격 워크플로 실행은 별개다. 실제 결과는 PROGRESS.md, 재현 절차/기술적 문제/데모 대본은 DEMO.md를 따른다.
+
+이 문서의 Phase 1~6 절은 당시의 기록이다. 동일 Request 반복이 독립 실행이었다는 초기 설명은 현재 일반/신뢰성 경로에 적용되지 않는다. 수동 execute만 독립 실험을 유지한다. Docker/장애 기능 미구현이라는 과거 문구의 현행 여부는 PROGRESS를 기준으로 판단한다.

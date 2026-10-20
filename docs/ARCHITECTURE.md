@@ -1,6 +1,6 @@
 # 아키텍처와 데이터 설계
 
-현재 구현은 Phase 2이다. 아래 Phase 1 설명은 초기 baseline이며, Phase 2 변경 사항과 현재 API는 문서 후반 및 API.md를 따른다.
+현재 구현은 Phase 7 로컬 통합 검증 범위다. 아래 Phase별 절은 해당 시점의 설계 이력이며 최신 모델·API·보장 범위는 이 문서의 현행 모델, API.md, PROGRESS.md를 따른다.
 
 ```mermaid
 flowchart LR
@@ -20,13 +20,13 @@ Phase 1은 고정 IF-USER-001 라우팅과 정상 HTTP 왕복만 제공한다. �
 - 양쪽 trace_id 인덱스, 요청 생성 시간 인덱스. Flyway 이력과 스키마를 서비스별로 분리한다.
 - 개인정보 최소화를 위해 Phase 1은 원본 전문을 저장하지 않는다. HTTP 응답 본문은 호출 결과로만 제공한다.
 
-## 최종 모델 계획 (아직 미구현)
+## 초기 최종 모델 계획 (역사적 설계안)
 
 IF_SYSTEM(system_id PK, base_url allow-list), IF_INTERFACE(interface_id PK, source/target FK, enabled, current_version), IF_INTERFACE_VERSION(interface_id/version 복합 PK, snapshot JSONB), IF_FIELD_MAPPING(version FK, source/target path, transform, default/null policy), IF_VALIDATION_RULE(version FK, stage, field, rule).
 
 IF_REQUEST(id UUID PK, interface/source/request_id UNIQUE, payload_hash, trace_id, version FK, status, original/mapped/response JSONB, timestamps), IF_REQUEST_ATTEMPT(attempt_id PK, request FK, sequence UNIQUE per request, HTTP/error/duration), IF_TRACE_EVENT(event_id PK, request/attempt FK, stage, redacted metadata, timestamp), IF_SIMULATION_SCENARIO(id PK, request scope, expiration, failure budget), IF_TARGET_RECEIPT(interface/source/request_id UNIQUE, payload_hash, stored result), IF_RETRY_SCHEDULE(id PK, request FK, due_at, lease_owner/until, retry count).
 
-위 고유키·FK·JSONB는 해당 Phase의 migration으로 도입한다. 현재 스키마가 최종 멱등성까지 제공한다고 해석하면 안 된다.
+위 이름은 초기 설계안이다. 현행은 IF_DELIVERY와 IF_BUSINESS_RESULT로 논리 고유키/재처리/업무 멱등성을 분리한다. 실제 스키마는 migration과 아래 현행 모델을 따른다.
 
 ## 식별자 및 상태 모델
 
@@ -34,7 +34,7 @@ Request ID는 논리 요청, Trace ID는 전체 처리 흐름, Attempt ID는 HTT
 
 Phase 1: SENDING → SUCCESS / FAILED / UNKNOWN. HTTP 4xx는 FAILED, I/O·5xx·응답 계약 불일치는 UNKNOWN. DB 장애는 API 500이며 HTTP 호출 전 기록 실패 시 대상 호출을 하지 않는다. 기록 후 프로세스가 중단되면 SENDING이 남을 수 있으며 자동 복구는 Phase 5 대상이다.
 
-최종 전환: RECEIVED → VALIDATING → VALIDATION_FAILED 또는 MAPPING_FAILED 또는 READY → SENDING → SUCCESS / FAILED / UNKNOWN / RETRY_WAIT. RETRY_WAIT → READY, 재시도 한도 초과 → DEAD_LETTER. 성공 상태 재전송은 저장 결과를 반환한다. 조건부 UPDATE와 lease로 중복 작업을 방지한다. 수동 재처리는 동일 Request/Trace ID, 새 Attempt ID를 사용한다.
+초기 상태 설계안(현행은 요청 status와 delivery state 분리): RECEIVED → VALIDATING → VALIDATION_FAILED 또는 MAPPING_FAILED 또는 READY → SENDING → SUCCESS / FAILED / UNKNOWN / RETRY_WAIT. RETRY_WAIT → READY, 재시도 한도 초과 → DEAD_LETTER. 성공 상태 재전송은 저장 결과를 반환한다. 조건부 UPDATE와 lease로 중복 작업을 방지한다. 수동 재처리는 동일 Request/Trace ID, 새 Attempt ID를 사용한다.
 
 ## 경계와 보안
 
@@ -114,3 +114,52 @@ DB 키·마스킹 진단·암호화 원본·Target 결과의 보관 범위는 �
 ## Phase 6 조회와 작업자
 
 History는 keyset metadata만 요청하며 선택 시 마스킹 상세를 별도로 읽는다. 시간/상태 복합 인덱스, 만료 lease 부분 인덱스와 WAIT/LEASED 분리 조회를 적용한다. HTTP 작업은 RETRY_CONCURRENCY(기본 2, 1~4) 고정 풀에서 실행하고 DB claim은 작업 실행 직전에 수행한다. 한 poll 최대 20건이며 전체 배치가 끝난 뒤 다음 poll을 수행한다. 다중 서버의 실제 소유권은 기존 DB lease/fencing이 결정한다. 최초 API 호출은 이 풀의 제한 대상이 아니다. 세 식별자와 불변 버전/보호 원본/UNKNOWN 정책을 유지한다. 측정 근거는 PERFORMANCE.md, 결정은 ADR-014를 따른다.
+
+## 현행 모델 · Phase 7
+
+```mermaid
+flowchart LR
+  UI[React Console] -->|same-origin /api| N[Nginx]
+  N --> A[Integration JVM]
+  A -->|capability + actual HTTP| B[Target JVM]
+  A --> I[(integration schema)]
+  B --> T[(target schema)]
+  W[bounded retry pool] -->|claim / fencing| I
+  W -->|same Request / Trace, new Attempt| B
+```
+
+| 소유자 | 테이블 | 역할 |
+| --- | --- | --- |
+| Integration | IF_SYSTEM / IF_INTERFACE / IF_INTERFACE_VERSION | 출처/대상 등록, 현재 정의, 불변 실행 snapshot |
+| Integration | IF_FIELD_MAPPING / IF_VALIDATION_RULE | 버전별 매핑·검증 projection |
+| Integration | IF_REQUEST | 내부 UUID, 논리 Request/Trace, 최신 결과·단계, 마스킹 진단 |
+| Integration | IF_ATTEMPT / IF_TRACE_EVENT | 각 실제 시도의 고유 ID/순번/결과와 단계별 저장 이벤트 |
+| Integration | IF_DELIVERY | UNIQUE(interface,source,request,scope), hash, 암호화 원본, 실행 상태/예산/lease/token |
+| Target | IF_SIMULATION | UUID별 요청 범위/유효기간/실패·수신 한도 |
+| Target | IF_BUSINESS_RESULT | 복합 업무 고유키/hash/저장 OK 결과 |
+| Target | IF_TARGET_RECEIPT | 각 수신·응답 계획/replay 여부·세 식별자 |
+
+요청 status는 VALIDATING/VALIDATION_FAILED/MAPPING_FAILED/READY/SENDING/SUCCESS/FAILED/UNKNOWN이다. 영속 실행 state는 WAIT/LEASED/DONE/DEAD_LETTER이며 서로 다른 의미다. DEAD_LETTER에 마지막 UNKNOWN이 남을 수 있다. Trace ID는 상관관계, Request ID는 출처·인터페이스·scope 안의 논리 요청, Attempt ID는 개별 HTTP 시도다. 최초 원자적 등록에 첫 lease/Attempt도 포함하며 이후 시도는 고정 버전·원본을 사용한다.
+
+```mermaid
+sequenceDiagram
+  participant C as Caller
+  participant A as Integration
+  participant I as Integration DB
+  participant B as Target
+  participant T as Target DB
+  C->>A: same logical key + payload
+  A->>I: short TX register/hash/version/envelope/lease/Attempt
+  A->>B: capability + business POST (outside DB TX)
+  B->>T: short TX unique/hash + result + receipt
+  T-->>B: commit
+  B--xA: response lost / sender crashes
+  Note over A,I: restart; wait actual lease expiry
+  A->>I: short TX old Attempt UNKNOWN + new lease/Attempt
+  A->>B: same Request/Trace, new Attempt
+  B->>T: saved result + replay receipt
+  B-->>A: stored OK result
+  A->>I: short TX token/expiry check + SUCCESS/DONE
+```
+
+일반 HTTP exactly-once 전송은 보장하지 않는다. 업무 중복 방지는 가상 Target 프로토콜·DB 고유키와 키/기록 보관 범위 안에서만 제공한다. 인증·키 회전·자동 삭제·전체 부하 검증은 미구현이다. 실제 전체 스택 검증은 Test-Compose.mjs, 실행·장애 대본은 DEMO.md, 상태와 근거는 PROGRESS.md를 따른다.
