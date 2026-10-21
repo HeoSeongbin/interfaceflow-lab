@@ -2,7 +2,7 @@
 
 두 독립 Spring Boot 서버의 실제 HTTP 통신으로 전문 검증·매핑·장애·재시도·중복 처리·복구를 재현하고 추적하는 개발용 플랫폼입니다. 가상 데이터만 사용합니다.
 
-현재 **Phase 7 — 통합 검증**을 진행했습니다. 로컬 Testcontainers와 전체 Compose 스택 검증 결과는 [PROGRESS](docs/PROGRESS.md)에 기록합니다. GitHub Actions는 구성했으며 원격 실행은 별도 미검증입니다.
+로컬 Testcontainers와 전체 Compose 스택 검증 결과는 [PROGRESS](docs/PROGRESS.md)에 기록합니다. GitHub Actions는 구성했으며 원격 실행은 별도 미검증입니다.
 
 ```mermaid
 flowchart LR
@@ -168,4 +168,4 @@ Test-Compose는 기본 .env를 수정하지 않고 고유 프로젝트·동적 l
 
 [대시보드](docs/screenshots/phase7-dashboard-desktop.png) · [모바일 대시보드](docs/screenshots/phase7-dashboard-mobile.png) · [이력·전문 비교](docs/screenshots/phase7-history-desktop.png) · [Retry Center](docs/screenshots/phase7-retry-mobile.png). Compose E2E에서 생성한 가상 데이터 화면입니다.
 
-인증/권한·자동 키 회전/보관 삭제·재처리 원본 편집·중앙 로그 수집·세부 단계 실행시간·다중 인스턴스 부하/전체 처리량·실제 휴대폰/스크린리더 검증은 남아 있습니다. 고유키/업무 결과 삭제나 키 손실은 재처리·중복 방지 보장에 영향을 줍니다. 현재 localhost 개발용이며 전체 운영 완성으로 간주하지 않습니다. Phase 7 이후 새 Phase를 임의로 시작하지 않습니다. 원격 CI 결과 확인과 후속 범위는 사용자와 정합니다.
+인증/권한·자동 키 회전/보관 삭제·재처리 원본 편집·중앙 로그 수집·세부 단계 실행시간·다중 인스턴스 부하/전체 처리량·실제 휴대폰/스크린리더 검증은 남아 있습니다. 고유키/업무 결과 삭제나 키 손실은 재처리·중복 방지 보장에 영향을 줍니다. 현재 localhost 개발용이며 전체 운영 완성으로 간주하지 않습니다. 원격 CI 결과 확인과 후속 범위는 사용자와 정합니다.
